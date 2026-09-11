@@ -375,15 +375,15 @@ export default function ProductsPage() {
       </div>
     </div>
 
-    <div className={viewMode === "grid" ? "grid grid-cols-2 gap-3 md:grid-cols-2 xl:grid-cols-3" : "space-y-5"}>{shown.map((service) => {
+    <div className={viewMode === "grid" ? "grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3" : "space-y-5"}>{shown.map((service) => {
       const isExpanded = query.trim().length > 0 || expandedServices.has(service.name);
       const compactGrid = viewMode === "grid" && !isExpanded;
       return <Card key={service.name} className={`overflow-hidden border-slate-200 shadow-sm transition-all duration-300 ${viewMode === "grid" && isExpanded ? "col-span-full" : ""}`}>
         <div className="h-1.5 bg-gradient-to-r from-indigo-500 via-cyan-400 to-emerald-400" />
-        <div className={`flex flex-col gap-4 ${compactGrid ? "p-3" : "p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between"}`}>
-          <button className={`flex min-w-0 flex-1 rounded-xl text-left outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${compactGrid ? "flex-col items-start gap-3" : "items-center gap-4"}`} onClick={() => toggleService(service.name)} aria-expanded={isExpanded}>
-            {service.imageUrl ? <img src={service.imageUrl} alt="" className={`${compactGrid ? "h-12 w-12" : "h-14 w-14"} rounded-2xl object-cover`} /> : <span className={`flex shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 ${compactGrid ? "h-12 w-12" : "h-14 w-14"}`}><Package className="h-6 w-6" /></span>}
-            <span className="min-w-0"><span className="flex items-center gap-2 text-lg font-bold text-slate-950">{isExpanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}{service.name}</span><span className="mt-1 block text-sm text-slate-500">{service.categories.length} kategori · {service.variants.length} varian · menu nomor {service.position}</span></span>
+        <div className={`flex flex-col gap-4 ${compactGrid ? "p-3 sm:p-4" : "p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between"}`}>
+          <button className={`flex min-w-0 flex-1 rounded-xl text-left outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${compactGrid ? "flex-col items-center gap-2 text-center" : "items-center gap-4"}`} onClick={() => toggleService(service.name)} aria-expanded={isExpanded}>
+            {service.imageUrl ? <img src={service.imageUrl} alt="" className={`${compactGrid ? "h-20 w-20 sm:h-16 sm:w-16" : "h-14 w-14"} rounded-2xl object-cover shadow-md`} /> : <span className={`flex shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 ${compactGrid ? "h-20 w-20 sm:h-16 sm:w-16" : "h-14 w-14"}`}><Package className={`${compactGrid ? "h-8 w-8" : "h-6 w-6"}`} /></span>}
+            <span className="min-w-0"><span className={`flex items-center gap-2 font-bold text-slate-950 ${compactGrid ? "justify-center text-sm leading-tight sm:text-base" : "text-lg"}`}>{isExpanded ? <ChevronDown className="h-5 w-5 shrink-0" /> : <ChevronRight className="h-5 w-5 shrink-0" />}{service.name}</span><span className={`mt-1 block text-slate-500 ${compactGrid ? "text-xs leading-relaxed" : "text-sm"}`}>{service.categories.length} kategori · {service.variants.length} varian · menu nomor {service.position}</span></span>
           </button>
           {canEdit && <div className="grid grid-cols-[1fr_44px] gap-2 sm:flex">
             <Button className="h-11 sm:h-8" variant="outline" size="sm" onClick={() => beginCreateCategory(service.name)}><Plus className="mr-1.5 h-4 w-4" />{compactGrid ? "Kategori" : "Tambah kategori"}</Button>
