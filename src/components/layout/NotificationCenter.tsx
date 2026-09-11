@@ -9,11 +9,13 @@ import {
   Clock,
   Clock3,
   ShoppingCart,
+  Volume2,
   XCircle,
 } from "lucide-react";
 import { transactionRealtimeService } from "@/services/transactionRealtimeService";
 import { useSettings } from "@/hooks/useSettings";
-import { playNotificationSound } from "@/lib/notificationSound";
+import { autoUnlockAudioOnGesture, playNotificationSound } from "@/lib/notificationSound";
+import { supabase } from "@/lib/supabase";
 import { TransactionRow } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -31,10 +33,65 @@ export function NotificationCenter() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [hasDesktopPermission, setHasDesktopPermission] = useState(false);
   const { settings, isLoaded } = useSettings();
   const dropdownRef = useRef<HTMLDivElement>(null);
   const recentEventsRef = useRef<Map<string, number>>(new Map());
   const unreadCount = notifications.filter((notification) => !notification.read).length;
+
+  // Auto unlock audio on any user interaction and load recent transactions feed
+  useEffect(() => {
+    autoUnlockAudioOnGesture();
+
+    if (typeof window !== "undefined" && "Notification" in window) {
+      setHasDesktopPermission(Notification.permission === "granted");
+    }
+
+    let isMounted = true;
+    async function loadRecentFeed() {
+      try {
+        const { data, error } = await supabase
+          .from("transactions")
+          .select("id, transaction_id, customer_name, product_name, status, created_at, updated_at")
+          .order("created_at", { ascending: false })
+          .limit(10);
+
+        if (!error && data && isMounted) {
+          const feed: AppNotification[] = data.map((item) => {
+            const status = item.status as TransactionRow["status"];
+            const statusLabel = status === "success" ? "Berhasil" : status === "cancelled" ? "Gagal" : "Pending";
+            const transactionId = item.transaction_id || item.id.slice(0, 8).toUpperCase();
+            const customer = item.customer_name || "Customer";
+            const product = item.product_name || "Produk";
+
+            return {
+              id: `init:${item.id}:${status}`,
+              type: "INSERT",
+              status,
+              title: status === "pending" ? "Transaksi baru" : `Status ${statusLabel}`,
+              message: `${customer} memesan ${product} · ${transactionId}`,
+              time: new Date(item.created_at || Date.now()),
+              read: true,
+            };
+          });
+
+          setNotifications((prev) => {
+            const existing = new Set(prev.map((p) => p.id));
+            const fresh = feed.filter((f) => !existing.has(f.id));
+            return [...prev, ...fresh];
+          });
+        }
+      } catch (e) {
+        console.warn("[NotificationCenter] Failed to fetch initial notifications:", e);
+      }
+    }
+
+    void loadRecentFeed();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -62,12 +119,21 @@ export function NotificationCenter() {
       if (!isInsert && !isUpdate) return;
 
       const data = payload.new as TransactionRow;
-      const oldData = payload.old as Partial<TransactionRow>;
+      if (!data || !data.id) return;
+
       const status = data.status;
 
       if (isInsert && !settings.notificationNewTransaction) return;
       if (isUpdate) {
-        if (oldData.status === status) return;
+        // payload.old may only contain the PK when REPLICA IDENTITY is DEFAULT.
+        // We use it when available, but we don't skip notifications when it's missing.
+        const oldData = (payload.old && typeof payload.old === "object" && "status" in payload.old)
+          ? payload.old as Partial<TransactionRow>
+          : null;
+
+        // If we have old data and the status didn't change, skip
+        if (oldData && oldData.status === status) return;
+
         if (status === "success" && !settings.notificationStatusSuccess) return;
         if (status === "pending" && !settings.notificationStatusPending) return;
         if (status === "cancelled" && !settings.notificationStatusCancelled) return;
@@ -105,7 +171,19 @@ export function NotificationCenter() {
           settings.notificationSound,
           settings.notificationVolume,
           settings.customNotificationAudio
-        ).catch((error) => console.warn("Could not play notification sound", error));
+        ).catch((error) => console.warn("[NotificationCenter] Could not play notification sound", error));
+      }
+
+      // Trigger browser desktop notification if permission granted
+      if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+        try {
+          new Notification(nextNotification.title, {
+            body: nextNotification.message,
+            icon: "/brand/softberystore-logo.png",
+          });
+        } catch {
+          // Ignored if browser prevents notification
+        }
       }
     });
 
@@ -122,6 +200,25 @@ export function NotificationCenter() {
     settings.notificationVolume,
     settings.customNotificationAudio,
   ]);
+
+  const requestDesktopPermission = async () => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      try {
+        const result = await Notification.requestPermission();
+        setHasDesktopPermission(result === "granted");
+      } catch {
+        // Ignore
+      }
+    }
+  };
+
+  const playTestSound = () => {
+    void playNotificationSound(
+      settings.notificationSound,
+      settings.notificationVolume,
+      settings.customNotificationAudio
+    );
+  };
 
   const markAllAsRead = () => {
     setNotifications((previous) => previous.map((notification) => ({ ...notification, read: true })));
@@ -190,11 +287,20 @@ export function NotificationCenter() {
                 <p className="text-xs font-medium text-slate-500">Aktivitas transaksi secara realtime</p>
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={playTestSound}
+                  title="Uji suara notifikasi"
+                  className="flex min-h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-95"
+                >
+                  <Volume2 className="h-3.5 w-3.5 text-indigo-600" />
+                  <span>Tes</span>
+                </button>
                 {unreadCount > 0 && (
                   <button
                     type="button"
                     onClick={markAllAsRead}
-                    className="flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-bold text-indigo-600 transition hover:bg-indigo-50"
+                    className="flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-xs font-bold text-indigo-600 transition hover:bg-indigo-50"
                   >
                     <Check className="h-3.5 w-3.5" /> Tandai dibaca
                   </button>
@@ -202,13 +308,28 @@ export function NotificationCenter() {
                 <button
                   type="button"
                   onClick={() => setIsOpen(false)}
-                  className="grid h-10 w-10 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                  className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
                   aria-label="Tutup notifikasi"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                 </button>
               </div>
             </div>
+
+            {/* Desktop Notification Banner if not granted yet */}
+            {typeof window !== "undefined" && "Notification" in window && !hasDesktopPermission && Notification.permission === "default" && (
+              <div className="flex items-center justify-between gap-3 border-b border-indigo-100 bg-indigo-50/70 px-4 py-2.5 text-xs text-indigo-900">
+                <span className="truncate">Izinkan notifikasi desktop agar terdengar saat buka tab lain.</span>
+                <button
+                  type="button"
+                  onClick={requestDesktopPermission}
+                  className="shrink-0 rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-sm hover:bg-indigo-700"
+                >
+                  Aktifkan
+                </button>
+              </div>
+            )}
+
             {/* Content */}
             <div className="flex-1 overflow-y-auto overscroll-contain">
               {notifications.length === 0 ? (
@@ -217,7 +338,7 @@ export function NotificationCenter() {
                     <Bell className="h-7 w-7" />
                   </span>
                   <p className="mt-4 text-base font-bold text-slate-700">Belum ada notifikasi baru</p>
-                  <p className="mt-1.5 text-sm text-slate-500">Aktivitas yang dipilih akan muncul di sini.</p>
+                  <p className="mt-1.5 text-sm text-slate-500">Aktivitas transaksi akan muncul secara realtime di sini.</p>
                 </div>
               ) : (
                 <div className="divide-y divide-slate-100">
@@ -265,16 +386,42 @@ export function NotificationCenter() {
                 <h3 className="text-sm font-black text-slate-950">Notifikasi</h3>
                 <p className="text-[11px] font-medium text-slate-500">Aktivitas transaksi secara realtime</p>
               </div>
-              {unreadCount > 0 && (
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={markAllAsRead}
-                  className="flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-xs font-bold text-indigo-600 transition hover:bg-indigo-50"
+                  onClick={playTestSound}
+                  title="Uji coba suara notifikasi"
+                  className="flex min-h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-95"
                 >
-                  <Check className="h-3.5 w-3.5" /> Tandai dibaca
+                  <Volume2 className="h-3 w-3 text-indigo-600" />
+                  <span>Tes Suara</span>
                 </button>
-              )}
+                {unreadCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={markAllAsRead}
+                    className="flex min-h-8 items-center gap-1 rounded-lg px-2 text-xs font-bold text-indigo-600 transition hover:bg-indigo-50"
+                  >
+                    <Check className="h-3 w-3" /> Tandai dibaca
+                  </button>
+                )}
+              </div>
             </div>
+
+            {/* Desktop Notification Banner */}
+            {typeof window !== "undefined" && "Notification" in window && !hasDesktopPermission && Notification.permission === "default" && (
+              <div className="flex items-center justify-between gap-2 border-b border-indigo-100 bg-indigo-50/70 px-3.5 py-2 text-xs text-indigo-900">
+                <span className="text-[11px]">Izinkan notifikasi desktop agar tetap berbunyi saat pindah tab.</span>
+                <button
+                  type="button"
+                  onClick={requestDesktopPermission}
+                  className="shrink-0 rounded-lg bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm hover:bg-indigo-700"
+                >
+                  Aktifkan
+                </button>
+              </div>
+            )}
+
             <div className="max-h-[min(65vh,420px)] overflow-y-auto overscroll-contain">
               {notifications.length === 0 ? (
                 <div className="px-5 py-10 text-center">
@@ -282,7 +429,7 @@ export function NotificationCenter() {
                     <Bell className="h-5 w-5" />
                   </span>
                   <p className="mt-3 text-sm font-bold text-slate-700">Belum ada notifikasi baru</p>
-                  <p className="mt-1 text-xs text-slate-500">Aktivitas yang dipilih akan muncul di sini.</p>
+                  <p className="mt-1 text-xs text-slate-500">Aktivitas transaksi akan muncul secara realtime di sini.</p>
                 </div>
               ) : (
                 <div className="divide-y divide-slate-100">

@@ -53,6 +53,47 @@ const PRESET_NOTES: Record<Exclude<NotificationSoundPreset, "custom" | "silent">
   ],
 };
 
+let sharedContext: AudioContext | null = null;
+let isUnlockAttached = false;
+
+function getSharedAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  const AudioContextClass =
+    window.AudioContext ||
+    (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextClass) return null;
+
+  if (!sharedContext || sharedContext.state === "closed") {
+    try {
+      sharedContext = new AudioContextClass();
+    } catch {
+      return null;
+    }
+  }
+  return sharedContext;
+}
+
+export function unlockAudioContext(): void {
+  if (typeof window === "undefined") return;
+  const ctx = getSharedAudioContext();
+  if (ctx && ctx.state === "suspended") {
+    ctx.resume().catch(() => {});
+  }
+}
+
+export function autoUnlockAudioOnGesture(): void {
+  if (typeof window === "undefined" || isUnlockAttached) return;
+  isUnlockAttached = true;
+
+  const unlock = () => {
+    unlockAudioContext();
+  };
+
+  window.addEventListener("click", unlock, { passive: true });
+  window.addEventListener("touchstart", unlock, { passive: true });
+  window.addEventListener("keydown", unlock, { passive: true });
+}
+
 export async function playNotificationSound(
   preset: NotificationSoundPreset,
   volume = 65,
@@ -62,39 +103,49 @@ export async function playNotificationSound(
   const volumeMultiplier = Math.min(1, Math.max(0, volume / 100));
 
   if (preset === "custom" && customAudio) {
-    const audio = new Audio(customAudio);
-    audio.volume = volumeMultiplier;
-    await audio.play();
-    return;
+    try {
+      const audio = new Audio(customAudio);
+      audio.volume = volumeMultiplier;
+      await audio.play();
+      return;
+    } catch (e) {
+      console.warn("[NotificationSound] Custom audio playback failed:", e);
+    }
   }
 
   const selectedPreset = preset === "custom" ? "soft" : preset;
-  const AudioContextClass = window.AudioContext ||
-    (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!AudioContextClass) return;
+  const context = getSharedAudioContext();
+  if (!context) return;
 
-  const context = new AudioContextClass();
-  if (context.state === "suspended") await context.resume();
-  const notes = PRESET_NOTES[selectedPreset];
+  try {
+    if (context.state === "suspended") {
+      await context.resume();
+    }
+  } catch {
+    // If resume fails due to autoplay policy, will continue to attempt or catch below
+  }
+
+  const notes = PRESET_NOTES[selectedPreset] || PRESET_NOTES.soft;
   const baseTime = context.currentTime + 0.015;
 
-  notes.forEach((note) => {
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    const startsAt = baseTime + note.start;
-    const endsAt = startsAt + note.duration;
+  try {
+    notes.forEach((note) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const startsAt = baseTime + note.start;
+      const endsAt = startsAt + note.duration;
 
-    oscillator.type = note.type ?? "sine";
-    oscillator.frequency.setValueAtTime(note.frequency, startsAt);
-    gain.gain.setValueAtTime(0.0001, startsAt);
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, note.gain * volumeMultiplier), startsAt + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.0001, endsAt);
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start(startsAt);
-    oscillator.stop(endsAt + 0.02);
-  });
-
-  const totalDuration = Math.max(...notes.map((note) => note.start + note.duration));
-  window.setTimeout(() => void context.close(), (totalDuration + 0.25) * 1000);
+      oscillator.type = note.type ?? "sine";
+      oscillator.frequency.setValueAtTime(note.frequency, startsAt);
+      gain.gain.setValueAtTime(0.0001, startsAt);
+      gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, note.gain * volumeMultiplier), startsAt + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, endsAt);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(startsAt);
+      oscillator.stop(endsAt + 0.02);
+    });
+  } catch (err) {
+    console.warn("[NotificationSound] Web Audio note playback error:", err);
+  }
 }
