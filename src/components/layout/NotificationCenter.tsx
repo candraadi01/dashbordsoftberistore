@@ -10,11 +10,17 @@ import {
   Clock3,
   ShoppingCart,
   Volume2,
+  X,
   XCircle,
 } from "lucide-react";
 import { transactionRealtimeService } from "@/services/transactionRealtimeService";
 import { useSettings } from "@/hooks/useSettings";
-import { autoUnlockAudioOnGesture, playNotificationSound } from "@/lib/notificationSound";
+import {
+  autoUnlockAudioOnGesture,
+  isAudioReady,
+  playNotificationSound,
+  unlockAudioContext,
+} from "@/lib/notificationSound";
 import { supabase } from "@/lib/supabase";
 import { TransactionRow } from "@/types";
 import { cn } from "@/lib/utils";
@@ -34,14 +40,21 @@ export function NotificationCenter() {
   const [isOpen, setIsOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [hasDesktopPermission, setHasDesktopPermission] = useState(false);
+  const [activeToast, setActiveToast] = useState<AppNotification | null>(null);
+  const [audioReady, setAudioReady] = useState(false);
+  const [showMobileAudioBanner, setShowMobileAudioBanner] = useState(true);
   const { settings, isLoaded } = useSettings();
   const dropdownRef = useRef<HTMLDivElement>(null);
   const recentEventsRef = useRef<Map<string, number>>(new Map());
+  const toastTimerRef = useRef<number | null>(null);
   const unreadCount = notifications.filter((notification) => !notification.read).length;
 
   // Auto unlock audio on any user interaction and load recent transactions feed
   useEffect(() => {
-    autoUnlockAudioOnGesture();
+    setAudioReady(isAudioReady());
+    autoUnlockAudioOnGesture(() => {
+      setAudioReady(true);
+    });
 
     if (typeof window !== "undefined" && "Notification" in window) {
       setHasDesktopPermission(Notification.permission === "granted");
@@ -90,6 +103,7 @@ export function NotificationCenter() {
 
     return () => {
       isMounted = false;
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     };
   }, []);
 
@@ -166,6 +180,13 @@ export function NotificationCenter() {
       };
 
       setNotifications((previous) => [nextNotification, ...previous].slice(0, 30));
+
+      // Show mobile/desktop floating toast popup banner
+      setActiveToast(nextNotification);
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = window.setTimeout(() => setActiveToast(null), 8000);
+
+      // Play sound with vibration for mobile
       if (settings.soundAlert && settings.notificationSound !== "silent") {
         void playNotificationSound(
           settings.notificationSound,
@@ -212,7 +233,20 @@ export function NotificationCenter() {
     }
   };
 
+  const enableMobileAudio = () => {
+    unlockAudioContext();
+    setAudioReady(true);
+    setShowMobileAudioBanner(false);
+    void playNotificationSound(
+      settings.notificationSound,
+      settings.notificationVolume,
+      settings.customNotificationAudio
+    );
+  };
+
   const playTestSound = () => {
+    unlockAudioContext();
+    setAudioReady(true);
     void playNotificationSound(
       settings.notificationSound,
       settings.notificationVolume,
@@ -467,6 +501,88 @@ export function NotificationCenter() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Mobile & Desktop Floating Notification Toast Banner */}
+      {typeof document !== "undefined" && activeToast && createPortal(
+        <div className="fixed top-3 inset-x-3 sm:inset-x-auto sm:right-4 sm:top-4 z-[999] max-w-sm rounded-2xl border border-indigo-500/30 bg-slate-950/95 p-3.5 text-white shadow-2xl backdrop-blur-md transition-all animate-in slide-in-from-top-4 duration-300">
+          <div className="flex items-start gap-3">
+            <span className="relative mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-indigo-600 text-white shadow-md shadow-indigo-500/30">
+              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 animate-ping rounded-full bg-rose-500" />
+              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-slate-950" />
+              <ShoppingCart className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-black uppercase tracking-wider text-indigo-400">
+                  {activeToast.title}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveToast(null)}
+                  className="grid h-6 w-6 place-items-center rounded-lg text-slate-400 hover:text-white"
+                  aria-label="Tutup pemberitahuan"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <p className="mt-0.5 text-xs font-semibold leading-relaxed text-slate-100">
+                {activeToast.message}
+              </p>
+              <div className="mt-2.5 flex items-center justify-between">
+                <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                  <Clock className="h-3 w-3" /> Baru saja
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsOpen(true);
+                    setActiveToast(null);
+                  }}
+                  className="rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-sm hover:bg-indigo-500 active:scale-95"
+                >
+                  Buka Detail
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Mobile Audio Priming Prompt (Disappears as soon as audio is unlocked by touch/click) */}
+      {typeof document !== "undefined" && !audioReady && showMobileAudioBanner && createPortal(
+        <aside
+          aria-label="Aktivasi suara notifikasi mobile"
+          className="fixed bottom-4 inset-x-3 z-[90] flex items-center justify-between gap-3 rounded-2xl border border-indigo-500/30 bg-slate-950/95 p-3 text-white shadow-2xl backdrop-blur-md sm:hidden animate-in slide-in-from-bottom-4 duration-300"
+        >
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-indigo-600 text-white">
+              <Volume2 className="h-4 w-4" />
+            </span>
+            <p className="truncate text-xs font-medium text-slate-200">
+              Ketuk untuk aktifkan suara pesanan
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={enableMobileAudio}
+              className="rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white shadow-md shadow-indigo-600/30 active:scale-95"
+            >
+              Aktifkan
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowMobileAudioBanner(false)}
+              className="grid h-7 w-7 place-items-center rounded-lg text-slate-400 hover:text-white"
+              aria-label="Tutup"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </aside>,
+        document.body
       )}
     </div>
   );
