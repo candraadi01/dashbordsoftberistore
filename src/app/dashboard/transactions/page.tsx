@@ -39,7 +39,24 @@ export default function TransactionsPage() {
     authService.getUserRole().then((role) => setCanEdit(role === "OWNER" || role === "ADMIN"));
     void load();
     const channel = transactionRealtimeService.subscribeTransactions(() => window.setTimeout(() => void load(), 250));
-    return () => transactionRealtimeService.unsubscribe(channel);
+
+    // Read search param from URL if redirected from notification
+    const syncUrlQuery = () => {
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search);
+        const search = params.get("search") || params.get("q") || params.get("id");
+        if (search) {
+          setQuery(search);
+        }
+      }
+    };
+    syncUrlQuery();
+    window.addEventListener("popstate", syncUrlQuery);
+
+    return () => {
+      transactionRealtimeService.unsubscribe(channel);
+      window.removeEventListener("popstate", syncUrlQuery);
+    };
   }, [load]);
 
   const shown = useMemo(() => rows.filter((row) =>

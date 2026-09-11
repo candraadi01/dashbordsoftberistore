@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import {
   Bell,
   Check,
@@ -9,7 +10,6 @@ import {
   Clock,
   Clock3,
   ShoppingCart,
-  Volume2,
   X,
   XCircle,
 } from "lucide-react";
@@ -33,27 +33,25 @@ export interface AppNotification {
   message: string;
   time: Date;
   read: boolean;
+  searchKey: string;
 }
 
 export function NotificationCenter() {
+  const router = useRouter();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeToast, setActiveToast] = useState<AppNotification | null>(null);
-  const [audioReady, setAudioReady] = useState(false);
-  const [showMobileAudioBanner, setShowMobileAudioBanner] = useState(true);
   const { settings, isLoaded } = useSettings();
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
   const recentEventsRef = useRef<Map<string, number>>(new Map());
   const toastTimerRef = useRef<number | null>(null);
   const unreadCount = notifications.filter((notification) => !notification.read).length;
 
   // Auto unlock audio on any user interaction and load recent transactions feed
   useEffect(() => {
-    setAudioReady(isAudioReady());
-    autoUnlockAudioOnGesture(() => {
-      setAudioReady(true);
-    });
+    autoUnlockAudioOnGesture();
 
     let isMounted = true;
     async function loadRecentFeed() {
@@ -80,6 +78,7 @@ export function NotificationCenter() {
               message: `${customer} memesan ${product} · ${transactionId}`,
               time: new Date(item.created_at || Date.now()),
               read: true,
+              searchKey: item.transaction_id || item.id,
             };
           });
 
@@ -104,9 +103,11 @@ export function NotificationCenter() {
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
+      const target = event.target as Node;
+      // Do not close if clicking inside the desktop dropdown or mobile sheet
+      if (dropdownRef.current && dropdownRef.current.contains(target)) return;
+      if (sheetRef.current && sheetRef.current.contains(target)) return;
+      setIsOpen(false);
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -172,6 +173,7 @@ export function NotificationCenter() {
           : `Pesanan ${transactionId} milik ${customer} menjadi ${statusLabel}.`,
         time: new Date(),
         read: false,
+        searchKey: data.transaction_id || data.id,
       };
 
       setNotifications((previous) => [nextNotification, ...previous].slice(0, 30));
@@ -217,29 +219,25 @@ export function NotificationCenter() {
     settings.customNotificationAudio,
   ]);
 
-  const enableMobileAudio = () => {
-    unlockAudioContext();
-    setAudioReady(true);
-    setShowMobileAudioBanner(false);
-    void playNotificationSound(
-      settings.notificationSound,
-      settings.notificationVolume,
-      settings.customNotificationAudio
-    );
+  const handleNotificationClick = (notification: AppNotification) => {
+    // 1. Pesan langsung hilang dari daftar notifikasi ketika di-klik
+    setNotifications((previous) => previous.filter((item) => item.id !== notification.id));
+    setIsOpen(false);
+    setActiveToast(null);
+
+    // 2. Redirect ke halaman transaksi sesuai transaksi yang di-klik
+    const query = encodeURIComponent(notification.searchKey);
+    router.push(`/dashboard/transactions?search=${query}`);
   };
 
-  const playTestSound = () => {
-    unlockAudioContext();
-    setAudioReady(true);
-    void playNotificationSound(
-      settings.notificationSound,
-      settings.notificationVolume,
-      settings.customNotificationAudio
-    );
-  };
-
-  const markAllAsRead = () => {
-    setNotifications((previous) => previous.map((notification) => ({ ...notification, read: true })));
+  const markAllAsRead = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    // Pesan langsung dibersihkan/hilang saat ditandai telah dibaca
+    setNotifications([]);
+    setActiveToast(null);
   };
 
   const getTimeAgo = (date: Date) => {
@@ -281,9 +279,7 @@ export function NotificationCenter() {
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}
-      </button>
-
-      {isOpen && (
+      </button>      {isOpen && (
         <>
           {/* Mobile: Bottom sheet via Portal */}
           {typeof document !== "undefined" && createPortal(
@@ -293,7 +289,11 @@ export function NotificationCenter() {
                 onClick={() => setIsOpen(false)}
                 aria-hidden="true"
               />
-              <div className="fixed inset-x-0 bottom-0 z-[101] flex max-h-[85dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl sm:hidden">
+              <div
+                ref={sheetRef}
+                onClick={(e) => e.stopPropagation()}
+                className="fixed inset-x-0 bottom-0 z-[101] flex max-h-[85dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl sm:hidden"
+              >
             {/* Handle bar */}
             <div className="flex justify-center pb-1 pt-3" onClick={() => setIsOpen(false)}>
               <span className="h-1.5 w-10 rounded-full bg-slate-300" />
@@ -304,25 +304,14 @@ export function NotificationCenter() {
                 <h3 className="text-base font-black text-slate-950">Notifikasi</h3>
                 <p className="text-xs font-medium text-slate-500">Aktivitas transaksi secara realtime</p>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={playTestSound}
-                  title="Uji suara notifikasi"
-                  className="flex min-h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-95"
-                >
-                  <Volume2 className="h-3.5 w-3.5 text-indigo-600" />
-                  <span>Tes</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsOpen(false)}
-                  className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-                  aria-label="Tutup notifikasi"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                aria-label="Tutup notifikasi"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
 
             {/* Sub-bar: Status dan Tombol Tandai Semua Dibaca - PASTI MUNCUL di mobile */}
@@ -367,9 +356,9 @@ export function NotificationCenter() {
                       <button
                         type="button"
                         key={notification.id}
-                        onClick={() => setNotifications((previous) => previous.map((item) => item.id === notification.id ? { ...item, read: true } : item))}
+                        onClick={() => handleNotificationClick(notification)}
                         className={cn(
-                          "flex w-full gap-3 px-5 py-4 text-left transition hover:bg-slate-50",
+                          "flex w-full gap-3 px-5 py-4 text-left transition hover:bg-slate-50 active:bg-slate-100",
                           !notification.read && "bg-indigo-50/35"
                         )}
                       >
@@ -404,26 +393,15 @@ export function NotificationCenter() {
                 <h3 className="text-sm font-black text-slate-950">Notifikasi</h3>
                 <p className="text-[11px] font-medium text-slate-500">Aktivitas transaksi secara realtime</p>
               </div>
-              <div className="flex items-center gap-2">
+              {notifications.length > 0 && (
                 <button
                   type="button"
-                  onClick={playTestSound}
-                  title="Uji coba suara notifikasi"
-                  className="flex min-h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-95"
+                  onClick={markAllAsRead}
+                  className="flex min-h-8 items-center gap-1 rounded-lg px-2 text-xs font-bold text-indigo-600 transition hover:bg-indigo-50"
                 >
-                  <Volume2 className="h-3 w-3 text-indigo-600" />
-                  <span>Tes Suara</span>
+                  <Check className="h-3.5 w-3.5" /> Tandai semua dibaca
                 </button>
-                {notifications.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={markAllAsRead}
-                    className="flex min-h-8 items-center gap-1 rounded-lg px-2 text-xs font-bold text-indigo-600 transition hover:bg-indigo-50"
-                  >
-                    <Check className="h-3 w-3" /> Tandai dibaca
-                  </button>
-                )}
-              </div>
+              )}
             </div>
 
             <div className="max-h-[min(65vh,420px)] overflow-y-auto overscroll-contain">
@@ -444,9 +422,9 @@ export function NotificationCenter() {
                       <button
                         type="button"
                         key={notification.id}
-                        onClick={() => setNotifications((previous) => previous.map((item) => item.id === notification.id ? { ...item, read: true } : item))}
+                        onClick={() => handleNotificationClick(notification)}
                         className={cn(
-                          "flex w-full gap-3 px-4 py-3 text-left transition hover:bg-slate-50",
+                          "flex w-full gap-3 px-4 py-3 text-left transition hover:bg-slate-50 active:bg-slate-100",
                           !notification.read && "bg-indigo-50/35"
                         )}
                       >
@@ -505,10 +483,7 @@ export function NotificationCenter() {
                 </span>
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsOpen(true);
-                    setActiveToast(null);
-                  }}
+                  onClick={() => handleNotificationClick(activeToast)}
                   className="rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-sm hover:bg-indigo-500 active:scale-95"
                 >
                   Buka Detail
@@ -517,41 +492,6 @@ export function NotificationCenter() {
             </div>
           </div>
         </div>,
-        document.body
-      )}
-
-      {/* Mobile Audio Priming Prompt (Disappears as soon as audio is unlocked by touch/click) */}
-      {typeof document !== "undefined" && !audioReady && showMobileAudioBanner && createPortal(
-        <aside
-          aria-label="Aktivasi suara notifikasi mobile"
-          className="fixed bottom-4 inset-x-3 z-[90] flex items-center justify-between gap-3 rounded-2xl border border-indigo-500/30 bg-slate-950/95 p-3 text-white shadow-2xl backdrop-blur-md sm:hidden animate-in slide-in-from-bottom-4 duration-300"
-        >
-          <div className="flex min-w-0 items-center gap-2.5">
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-indigo-600 text-white">
-              <Volume2 className="h-4 w-4" />
-            </span>
-            <p className="truncate text-xs font-medium text-slate-200">
-              Ketuk untuk aktifkan suara pesanan
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <button
-              type="button"
-              onClick={enableMobileAudio}
-              className="rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white shadow-md shadow-indigo-600/30 active:scale-95"
-            >
-              Aktifkan
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowMobileAudioBanner(false)}
-              className="grid h-7 w-7 place-items-center rounded-lg text-slate-400 hover:text-white"
-              aria-label="Tutup"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </aside>,
         document.body
       )}
     </div>
