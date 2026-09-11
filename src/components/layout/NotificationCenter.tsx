@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Bell,
   Check,
@@ -169,15 +170,15 @@ export function NotificationCenter() {
 
       {isOpen && (
         <>
-          {/* Mobile backdrop overlay */}
-          <div
-            className="fixed inset-0 z-[64] bg-slate-950/40 backdrop-blur-[2px] sm:hidden"
-            onClick={() => setIsOpen(false)}
-            aria-hidden="true"
-          />
-
-          {/* Mobile: Bottom sheet */}
-          <div className="fixed inset-x-0 bottom-0 z-[65] flex max-h-[85dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl sm:hidden">
+          {/* Mobile: Bottom sheet via Portal */}
+          {typeof document !== "undefined" && createPortal(
+            <>
+              <div
+                className="fixed inset-0 z-[100] bg-slate-950/40 backdrop-blur-[2px] sm:hidden"
+                onClick={() => setIsOpen(false)}
+                aria-hidden="true"
+              />
+              <div className="fixed inset-x-0 bottom-0 z-[101] flex max-h-[85dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl sm:hidden">
             {/* Handle bar */}
             <div className="flex justify-center pb-1 pt-3" onClick={() => setIsOpen(false)}>
               <span className="h-1.5 w-10 rounded-full bg-slate-300" />
@@ -253,6 +254,9 @@ export function NotificationCenter() {
               )}
             </div>
           </div>
+            </>,
+            document.body
+          )}
 
           {/* Desktop: Dropdown */}
           <div className="absolute right-0 z-[65] mt-2 hidden w-96 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:block">
