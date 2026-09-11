@@ -39,7 +39,6 @@ export function NotificationCenter() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [hasDesktopPermission, setHasDesktopPermission] = useState(false);
   const [activeToast, setActiveToast] = useState<AppNotification | null>(null);
   const [audioReady, setAudioReady] = useState(false);
   const [showMobileAudioBanner, setShowMobileAudioBanner] = useState(true);
@@ -55,10 +54,6 @@ export function NotificationCenter() {
     autoUnlockAudioOnGesture(() => {
       setAudioReady(true);
     });
-
-    if (typeof window !== "undefined" && "Notification" in window) {
-      setHasDesktopPermission(Notification.permission === "granted");
-    }
 
     let isMounted = true;
     async function loadRecentFeed() {
@@ -222,17 +217,6 @@ export function NotificationCenter() {
     settings.customNotificationAudio,
   ]);
 
-  const requestDesktopPermission = async () => {
-    if (typeof window !== "undefined" && "Notification" in window) {
-      try {
-        const result = await Notification.requestPermission();
-        setHasDesktopPermission(result === "granted");
-      } catch {
-        // Ignore
-      }
-    }
-  };
-
   const enableMobileAudio = () => {
     unlockAudioContext();
     setAudioReady(true);
@@ -330,36 +314,36 @@ export function NotificationCenter() {
                   <Volume2 className="h-3.5 w-3.5 text-indigo-600" />
                   <span>Tes</span>
                 </button>
-                {unreadCount > 0 && (
-                  <button
-                    type="button"
-                    onClick={markAllAsRead}
-                    className="flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-xs font-bold text-indigo-600 transition hover:bg-indigo-50"
-                  >
-                    <Check className="h-3.5 w-3.5" /> Tandai dibaca
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={() => setIsOpen(false)}
                   className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
                   aria-label="Tutup notifikasi"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                  <X className="h-4 w-4" />
                 </button>
               </div>
             </div>
 
-            {/* Desktop Notification Banner if not granted yet */}
-            {typeof window !== "undefined" && "Notification" in window && !hasDesktopPermission && Notification.permission === "default" && (
-              <div className="flex items-center justify-between gap-3 border-b border-indigo-100 bg-indigo-50/70 px-4 py-2.5 text-xs text-indigo-900">
-                <span className="truncate">Izinkan notifikasi desktop agar terdengar saat buka tab lain.</span>
+            {/* Sub-bar: Status dan Tombol Tandai Semua Dibaca - PASTI MUNCUL di mobile */}
+            {notifications.length > 0 && (
+              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-5 py-2.5 text-xs">
+                <span className="font-semibold text-slate-600">
+                  {unreadCount > 0 ? (
+                    <span className="flex items-center gap-1.5 font-bold text-indigo-700">
+                      <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+                      {unreadCount} transaksi belum dibaca
+                    </span>
+                  ) : (
+                    "Semua transaksi sudah dibaca"
+                  )}
+                </span>
                 <button
                   type="button"
-                  onClick={requestDesktopPermission}
-                  className="shrink-0 rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-sm hover:bg-indigo-700"
+                  onClick={markAllAsRead}
+                  className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-indigo-600 shadow-xs transition hover:bg-indigo-50 active:scale-95"
                 >
-                  Aktifkan
+                  <Check className="h-3.5 w-3.5" /> Tandai semua dibaca
                 </button>
               </div>
             )}
@@ -430,7 +414,7 @@ export function NotificationCenter() {
                   <Volume2 className="h-3 w-3 text-indigo-600" />
                   <span>Tes Suara</span>
                 </button>
-                {unreadCount > 0 && (
+                {notifications.length > 0 && (
                   <button
                     type="button"
                     onClick={markAllAsRead}
@@ -441,20 +425,6 @@ export function NotificationCenter() {
                 )}
               </div>
             </div>
-
-            {/* Desktop Notification Banner */}
-            {typeof window !== "undefined" && "Notification" in window && !hasDesktopPermission && Notification.permission === "default" && (
-              <div className="flex items-center justify-between gap-2 border-b border-indigo-100 bg-indigo-50/70 px-3.5 py-2 text-xs text-indigo-900">
-                <span className="text-[11px]">Izinkan notifikasi desktop agar tetap berbunyi saat pindah tab.</span>
-                <button
-                  type="button"
-                  onClick={requestDesktopPermission}
-                  className="shrink-0 rounded-lg bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm hover:bg-indigo-700"
-                >
-                  Aktifkan
-                </button>
-              </div>
-            )}
 
             <div className="max-h-[min(65vh,420px)] overflow-y-auto overscroll-contain">
               {notifications.length === 0 ? (
