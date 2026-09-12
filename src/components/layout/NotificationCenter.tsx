@@ -5,12 +5,15 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   Bell,
+  BellOff,
   Check,
   CheckCircle2,
   Clock,
   Clock3,
   ExternalLink,
+  Loader2,
   ShoppingCart,
+  Smartphone,
   X,
   XCircle,
 } from "lucide-react";
@@ -23,6 +26,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { TransactionRow } from "@/types";
 import { cn } from "@/lib/utils";
+import { usePushNotification } from "@/hooks/usePushNotification";
 
 export interface AppNotification {
   id: string;
@@ -77,7 +81,10 @@ export function NotificationCenter() {
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
-  // Initialize read IDs & initial recent transactions
+  // Push notification native ke HP
+  const push = usePushNotification();
+
+
   useEffect(() => {
     autoUnlockAudioOnGesture();
     const initialRead = getReadIds();
@@ -414,6 +421,63 @@ export function NotificationCenter() {
                   </div>
                 )}
 
+                {/* Banner Aktivasi Notifikasi HP */}
+                {push.isSupported && push.status !== "granted" && push.status !== "denied" && push.status !== "unsupported" && (
+                  <div className="flex items-center gap-3 border-b border-indigo-100 bg-indigo-50 px-5 py-3">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-indigo-600 text-white shadow-sm">
+                      <Smartphone className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-slate-900">Aktifkan notifikasi HP</p>
+                      <p className="text-[11px] text-slate-500">Terima notifikasi meski browser tertutup</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void push.subscribe()}
+                      disabled={push.status === "loading"}
+                      className="flex shrink-0 items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-indigo-700 active:scale-95 disabled:opacity-60"
+                    >
+                      {push.status === "loading" ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Bell className="h-3.5 w-3.5" />
+                      )}
+                      {push.status === "loading" ? "Menghubungkan..." : "Aktifkan"}
+                    </button>
+                  </div>
+                )}
+
+                {/* Banner: Notifikasi HP Aktif */}
+                {push.status === "granted" && (
+                  <div className="flex items-center gap-3 border-b border-emerald-100 bg-emerald-50 px-5 py-2.5">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-emerald-100 text-emerald-600">
+                      <Smartphone className="h-4 w-4" />
+                    </span>
+                    <p className="min-w-0 flex-1 text-xs font-semibold text-emerald-700">
+                      Notifikasi HP aktif ✓
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void push.unsubscribe()}
+                      className="flex shrink-0 items-center gap-1 rounded-lg border border-emerald-200 bg-white px-2 py-1 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100 active:scale-95"
+                    >
+                      <BellOff className="h-3 w-3" /> Matikan
+                    </button>
+                  </div>
+                )}
+
+                {/* Banner: Izin ditolak */}
+                {push.status === "denied" && (
+                  <div className="flex items-center gap-3 border-b border-amber-100 bg-amber-50 px-5 py-2.5">
+                    <BellOff className="h-4 w-4 shrink-0 text-amber-600" />
+                    <p className="text-xs font-medium text-amber-700">
+                      Notifikasi HP diblokir. Buka Pengaturan browser untuk mengizinkan.
+                    </p>
+                  </div>
+                )}
+
+
+
                 {/* Content List */}
                 <div className="flex-1 overflow-y-auto overscroll-contain">
                   {notifications.length === 0 ? (
@@ -515,6 +579,47 @@ export function NotificationCenter() {
                 </button>
               )}
             </div>
+
+            {/* Desktop: Banner Aktivasi Notifikasi HP */}
+            {push.isSupported && push.status !== "granted" && push.status !== "denied" && push.status !== "unsupported" && (
+              <div className="flex items-center gap-2.5 border-b border-indigo-100 bg-indigo-50/80 px-4 py-2.5">
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-indigo-600 text-white">
+                  <Smartphone className="h-3.5 w-3.5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-bold text-slate-900">Aktifkan notifikasi HP</p>
+                  <p className="text-[10px] text-slate-500">Muncul meski browser tertutup</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void push.subscribe()}
+                  disabled={push.status === "loading"}
+                  className="flex shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-[11px] font-bold text-white transition hover:bg-indigo-700 active:scale-95 disabled:opacity-60"
+                >
+                  {push.status === "loading" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bell className="h-3 w-3" />}
+                  {push.status === "loading" ? "..." : "Aktifkan"}
+                </button>
+              </div>
+            )}
+            {push.status === "granted" && (
+              <div className="flex items-center gap-2 border-b border-emerald-100 bg-emerald-50 px-4 py-2">
+                <Smartphone className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                <p className="min-w-0 flex-1 text-[11px] font-semibold text-emerald-700">Notifikasi HP aktif ✓</p>
+                <button
+                  type="button"
+                  onClick={() => void push.unsubscribe()}
+                  className="text-[10px] font-semibold text-emerald-700 underline hover:text-emerald-900"
+                >
+                  Matikan
+                </button>
+              </div>
+            )}
+            {push.status === "denied" && (
+              <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50 px-4 py-2">
+                <BellOff className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+                <p className="text-[10px] font-medium text-amber-700">Notifikasi diblokir di pengaturan browser.</p>
+              </div>
+            )}
 
             <div className="max-h-[min(65vh,420px)] overflow-y-auto overscroll-contain">
               {notifications.length === 0 ? (
