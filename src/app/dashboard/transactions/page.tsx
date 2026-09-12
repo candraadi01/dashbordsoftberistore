@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, CheckCircle2, Clock3, Loader2, MessageCircle, Receipt, RefreshCw, Search, Trash2, X, XCircle } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { authService } from "@/services/authService";
 import { transactionRealtimeService } from "@/services/transactionRealtimeService";
 import { transactionService } from "@/services/transactionService";
@@ -28,19 +28,34 @@ export default function TransactionsPage() {
   const [modalSuccess, setModalSuccess] = useState("");
   const [deleting, setDeleting] = useState<TransactionRow | null>(null);
   const [busy, setBusy] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  const hasAutoOpenedRef = useRef(false);
 
   const load = useCallback(async () => {
     try { setRows(await transactionService.getTransactions()); setError(""); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Gagal memuat transaksi."); }
   }, []);
 
+  const handleRefresh = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    const start = Date.now();
+    try {
+      await load();
+    } finally {
+      const elapsed = Date.now() - start;
+      const remaining = Math.max(0, 800 - elapsed);
+      window.setTimeout(() => setIsRefreshing(false), remaining);
+    }
+  };
+
   useEffect(() => {
     authService.getUserRole().then((role) => setCanEdit(role === "OWNER" || role === "ADMIN"));
     void load();
     const channel = transactionRealtimeService.subscribeTransactions(() => window.setTimeout(() => void load(), 250));
 
-    // Read search param from URL if redirected from notification
+    // Read search param from URL if redirected from notification or overview
     const syncUrlQuery = () => {
       if (typeof window !== "undefined") {
         const params = new URLSearchParams(window.location.search);
@@ -58,6 +73,28 @@ export default function TransactionsPage() {
       window.removeEventListener("popstate", syncUrlQuery);
     };
   }, [load]);
+
+  // Auto-open modal status if arrived from overview with ?id=...&open=true
+  useEffect(() => {
+    if (rows.length === 0 || hasAutoOpenedRef.current) return;
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const targetId = params.get("id") || params.get("search") || params.get("q");
+      const shouldOpen = params.get("open") === "true" || params.get("edit") === "true";
+
+      if (targetId) {
+        const found = rows.find(
+          (r) => r.id === targetId || r.transaction_id === targetId || r.id.toLowerCase().startsWith(targetId.toLowerCase())
+        );
+        if (found) {
+          if (shouldOpen) {
+            hasAutoOpenedRef.current = true;
+            openStatus(found);
+          }
+        }
+      }
+    }
+  }, [rows]);
 
   const shown = useMemo(() => rows.filter((row) =>
     (filter === "all" || row.status === filter) &&
@@ -101,7 +138,29 @@ export default function TransactionsPage() {
   }
 
   return <div className="mx-auto max-w-[1500px] space-y-5 pb-8">
-    <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-sm font-bold text-indigo-600">Penjualan real-time</p><h1 className="mt-1 flex items-center gap-3 text-2xl font-black text-slate-950 sm:text-3xl"><Receipt className="text-indigo-600" />Transaksi</h1><p className="mt-1 text-sm text-slate-500">Status dashboard dan balasan owner di WhatsApp selalu disinkronkan.</p></div><Button variant="outline" onClick={() => void load()}><RefreshCw className="mr-2 h-4 w-4" />Segarkan</Button></header>
+    <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p className="text-sm font-bold text-indigo-600">Penjualan real-time</p>
+        <h1 className="mt-1 flex items-center gap-3 text-2xl font-black text-slate-950 sm:text-3xl">
+          <Receipt className="text-indigo-600" />
+          Transaksi
+        </h1>
+        <p className="mt-1 text-sm text-slate-500">Status dashboard dan balasan owner di WhatsApp selalu disinkronkan.</p>
+      </div>
+      <Button
+        variant="outline"
+        onClick={handleRefresh}
+        disabled={isRefreshing}
+        className="h-10 border-slate-200 transition-all active:scale-95 shadow-2xs hover:border-indigo-300 hover:bg-indigo-50/50"
+      >
+        <RefreshCw
+          className={`mr-2 h-4 w-4 transition-transform duration-700 ${
+            isRefreshing ? "animate-spin text-indigo-600" : ""
+          }`}
+        />
+        {isRefreshing ? "Menyegarkan..." : "Segarkan"}
+      </Button>
+    </header>
 
     <Card><CardContent className="grid gap-3 p-4 sm:grid-cols-[1fr_190px]"><div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" /><input className="h-10 w-full rounded-xl border border-slate-200 pl-10 pr-3 text-sm outline-none focus:border-indigo-400" placeholder="Cari ID, customer, WhatsApp, atau produk" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select className="h-10 rounded-xl border border-slate-200 px-3 text-sm" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">Semua status</option><option value="pending">Pending</option><option value="success">Berhasil</option><option value="cancelled">Gagal</option></select></CardContent></Card>
     {error && <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}

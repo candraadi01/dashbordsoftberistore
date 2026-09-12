@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, ChevronDown, ChevronRight, ImagePlus, Layers3, LayoutGrid, List, Package, Pencil, Percent, Plus, Save, Search, Settings2, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Camera, CheckCircle2, ChevronDown, ChevronRight, ImagePlus, Layers3, LayoutGrid, List, Loader2, Package, Pencil, Percent, Plus, Save, Search, Settings2, Trash2, Upload, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { productMasterService, ProductMasterRow } from "@/services/productMasterService";
 import { authService } from "@/services/authService";
@@ -25,6 +25,11 @@ type ServiceGroup = { name: string; order: number; position: number; imageUrl: s
 type FormMode = "catalog" | "category" | "variant" | "edit";
 type ViewMode = "list" | "grid";
 type DeleteRequest = { title: string; description: string; action: () => Promise<void> };
+type QuickImageTarget = {
+  serviceName: string;
+  currentImageUrl: string | null;
+  currentPublicId: string | null;
+};
 
 const emptyForm: FormState = {
   name: "", category: "", duration: "1 bulan", price: "", profit: "", status: "ACTIVE", image_url: "", image_public_id: "",
@@ -82,6 +87,13 @@ export default function ProductsPage() {
   const [orderingBusy, setOrderingBusy] = useState(false);
   const [error, setError] = useState("");
   const [canEdit, setCanEdit] = useState(false);
+
+  // Quick image modal states
+  const [imageModalTarget, setImageModalTarget] = useState<QuickImageTarget | null>(null);
+  const [imageModalUrl, setImageModalUrl] = useState("");
+  const [imageModalPublicId, setImageModalPublicId] = useState("");
+  const [imageModalBusy, setImageModalBusy] = useState(false);
+  const [imageModalError, setImageModalError] = useState("");
 
   const load = useCallback(async () => setProducts(await productMasterService.getProducts()), []);
   useEffect(() => {
@@ -185,6 +197,62 @@ export default function ProductsPage() {
       setError(uploadError instanceof Error ? uploadError.message : "Upload gagal");
     } finally {
       setBusy(false);
+    }
+  }
+
+  function openImageModal(service: ServiceGroup) {
+    const currentPublicId = service.variants.find((v) => v.image_public_id)?.image_public_id ?? null;
+    setImageModalTarget({
+      serviceName: service.name,
+      currentImageUrl: service.imageUrl,
+      currentPublicId,
+    });
+    setImageModalUrl(service.imageUrl || "");
+    setImageModalPublicId(currentPublicId || "");
+    setImageModalError("");
+  }
+
+  async function uploadServiceImageFile(file?: File) {
+    if (!file) return;
+    setImageModalBusy(true);
+    setImageModalError("");
+    try {
+      const { data } = await supabase.auth.getSession();
+      const body = new FormData();
+      body.set("file", file);
+      const response = await fetch("/api/uploads/product", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}` },
+        body,
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      setImageModalUrl(result.url);
+      setImageModalPublicId(result.publicId);
+    } catch (uploadError) {
+      setImageModalError(uploadError instanceof Error ? uploadError.message : "Upload gagal");
+    } finally {
+      setImageModalBusy(false);
+    }
+  }
+
+  async function saveServiceImage() {
+    if (!imageModalTarget) return;
+    setImageModalBusy(true);
+    setImageModalError("");
+    try {
+      await productMasterService.updateServiceImage(
+        imageModalTarget.serviceName,
+        imageModalUrl || null,
+        imageModalPublicId || null
+      );
+      setImageModalTarget(null);
+      setSavedNotice(true);
+      await load();
+    } catch (saveError) {
+      setImageModalError(saveError instanceof Error ? saveError.message : "Gagal menyimpan foto produk.");
+    } finally {
+      setImageModalBusy(false);
     }
   }
 
@@ -381,14 +449,85 @@ export default function ProductsPage() {
       return <Card key={service.name} className={`overflow-hidden border-slate-200 shadow-sm transition-all duration-300 ${viewMode === "grid" && isExpanded ? "col-span-full" : ""}`}>
         <div className="h-1.5 bg-gradient-to-r from-indigo-500 via-cyan-400 to-emerald-400" />
         <div className={`flex flex-col gap-4 ${compactGrid ? "p-3 sm:p-4" : "p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between"}`}>
-          <button className={`flex min-w-0 flex-1 rounded-xl text-left outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${compactGrid ? "flex-col items-center gap-2 text-center" : "items-center gap-4"}`} onClick={() => toggleService(service.name)} aria-expanded={isExpanded}>
-            {service.imageUrl ? <img src={service.imageUrl} alt="" className={`${compactGrid ? "h-20 w-20 sm:h-16 sm:w-16" : "h-14 w-14"} rounded-2xl object-cover shadow-md`} /> : <span className={`flex shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 ${compactGrid ? "h-20 w-20 sm:h-16 sm:w-16" : "h-14 w-14"}`}><Package className={`${compactGrid ? "h-8 w-8" : "h-6 w-6"}`} /></span>}
-            <span className="min-w-0"><span className={`flex items-center gap-2 font-bold text-slate-950 ${compactGrid ? "justify-center text-sm leading-tight sm:text-base" : "text-lg"}`}>{isExpanded ? <ChevronDown className="h-5 w-5 shrink-0" /> : <ChevronRight className="h-5 w-5 shrink-0" />}{service.name}</span><span className={`mt-1 block text-slate-500 ${compactGrid ? "text-xs leading-relaxed" : "text-sm"}`}>{service.categories.length} kategori · {service.variants.length} varian · menu nomor {service.position}</span></span>
-          </button>
-          {canEdit && <div className="grid grid-cols-[1fr_44px] gap-2 sm:flex">
-            <Button className="h-11 sm:h-8" variant="outline" size="sm" onClick={() => beginCreateCategory(service.name)}><Plus className="mr-1.5 h-4 w-4" />{compactGrid ? "Kategori" : "Tambah kategori"}</Button>
-            <Button className="group h-11 w-11 overflow-hidden shadow-red-200 transition-all hover:-translate-y-0.5 hover:shadow-lg sm:h-9 sm:w-9" variant="destructive" size="icon" onClick={() => removeService(service.name)} aria-label="Hapus layanan"><Trash2 className="h-4 w-4 transition-transform duration-200 group-hover:scale-110 group-hover:-rotate-6" /></Button>
-          </div>}
+          <div className={`flex min-w-0 flex-1 ${compactGrid ? "flex-col items-center gap-2 text-center" : "items-center gap-4"}`}>
+            {/* Foto Produk interaktif */}
+            <div className="relative group/photo shrink-0">
+              <button
+                type="button"
+                onClick={() => openImageModal(service)}
+                className="relative block rounded-2xl overflow-hidden focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm transition active:scale-95 cursor-pointer"
+                title={`Klik untuk ganti foto ${service.name}`}
+              >
+                {service.imageUrl ? (
+                  <img
+                    src={service.imageUrl}
+                    alt={service.name}
+                    className={`${compactGrid ? "h-20 w-20 sm:h-16 sm:w-16" : "h-14 w-14"} rounded-2xl object-cover`}
+                  />
+                ) : (
+                  <span className={`flex items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 ${compactGrid ? "h-20 w-20 sm:h-16 sm:w-16" : "h-14 w-14"}`}>
+                    <Package className={`${compactGrid ? "h-8 w-8" : "h-6 w-6"}`} />
+                  </span>
+                )}
+                {canEdit && (
+                  <div className="absolute inset-0 bg-slate-950/55 opacity-0 group-hover/photo:opacity-100 transition-opacity flex flex-col items-center justify-center text-white text-[10px] font-bold gap-0.5 rounded-2xl">
+                    <Camera className="h-4 w-4" />
+                    <span>Ganti</span>
+                  </div>
+                )}
+              </button>
+            </div>
+
+            {/* Title & expand trigger */}
+            <button
+              type="button"
+              className="min-w-0 flex-1 text-left outline-none cursor-pointer"
+              onClick={() => toggleService(service.name)}
+              aria-expanded={isExpanded}
+            >
+              <span className={`flex items-center gap-2 font-bold text-slate-950 ${compactGrid ? "justify-center text-sm leading-tight sm:text-base" : "text-lg"}`}>
+                {isExpanded ? <ChevronDown className="h-5 w-5 shrink-0 text-indigo-600" /> : <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" />}
+                {service.name}
+              </span>
+              <span className={`mt-1 block text-slate-500 ${compactGrid ? "text-xs leading-relaxed text-center" : "text-sm"}`}>
+                {service.categories.length} kategori · {service.variants.length} varian · menu nomor {service.position}
+              </span>
+            </button>
+          </div>
+
+          {canEdit && (
+            <div className={`grid gap-2 ${compactGrid ? "grid-cols-2 w-full pt-1" : "grid-cols-[auto_1fr_44px] sm:flex sm:items-center"}`}>
+              <Button
+                type="button"
+                className="h-11 sm:h-8 text-xs font-bold border-indigo-200 bg-indigo-50/70 text-indigo-700 hover:bg-indigo-100"
+                variant="outline"
+                size="sm"
+                onClick={() => openImageModal(service)}
+                title={`Ganti foto produk ${service.name}`}
+              >
+                <Camera className="mr-1.5 h-3.5 w-3.5" />
+                Ganti Foto
+              </Button>
+              <Button
+                className="h-11 sm:h-8 text-xs font-bold"
+                variant="outline"
+                size="sm"
+                onClick={() => beginCreateCategory(service.name)}
+              >
+                <Plus className="mr-1.5 h-4 w-4" />
+                {compactGrid ? "Kategori" : "Tambah kategori"}
+              </Button>
+              <Button
+                className="group h-11 w-11 overflow-hidden shadow-red-200 transition-all hover:-translate-y-0.5 hover:shadow-lg sm:h-8 sm:w-8"
+                variant="destructive"
+                size="icon"
+                onClick={() => removeService(service.name)}
+                aria-label="Hapus layanan"
+              >
+                <Trash2 className="h-4 w-4 transition-transform duration-200 group-hover:scale-110 group-hover:-rotate-6" />
+              </Button>
+            </div>
+          )}
         </div>
 
         {isExpanded && <div className="space-y-4 border-t border-slate-100 bg-slate-50/60 p-4 sm:p-5">{service.categories.map((category) => <div key={`${service.name}:${category.name}`} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
@@ -434,8 +573,44 @@ export default function ProductsPage() {
         <Field label="Harga jual" type="number" value={form.price} set={(value) => setForm({ ...form, price: value })} required />
         <Field label="Jumlah keuntungan" type="number" value={form.profit} set={(value) => setForm({ ...form, profit: value })} required hint="Keuntungan bersih untuk satu transaksi." />
         <div className="flex min-h-20 items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-4 sm:col-span-2"><div><p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Persentase keuntungan</p><p className="mt-1 text-xs text-emerald-700/70">Dihitung otomatis dari harga jual.</p></div><div className="flex items-center gap-2 text-2xl font-bold text-emerald-700"><Percent className="h-5 w-5" />{profitPercentage.toFixed(2)}%</div></div>
-        <label className="space-y-1 text-sm font-medium text-slate-700 sm:col-span-2">Gambar produk<span className="flex h-12 cursor-pointer items-center justify-center rounded-xl border border-dashed border-indigo-300 bg-indigo-50 text-indigo-700 active:scale-[0.99]"><ImagePlus className="mr-2 h-4 w-4" />{busy ? "Memproses..." : "Pilih gambar"}<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => upload(event.target.files?.[0])} /></span></label>
-        {form.image_url && <div className="sm:col-span-2"><img src={form.image_url} alt="Pratinjau" className="h-24 w-24 rounded-2xl object-cover" /></div>}
+        <div className="sm:col-span-2 space-y-2">
+          <label className="text-sm font-medium text-slate-700 block">Gambar produk</label>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+            {form.image_url ? (
+              <div className="relative shrink-0 mx-auto sm:mx-0">
+                <img src={form.image_url} alt="Pratinjau" className="h-20 w-20 rounded-xl object-cover shadow-sm ring-1 ring-slate-200" />
+              </div>
+            ) : (
+              <div className="grid h-20 w-20 shrink-0 place-items-center rounded-xl bg-white border border-dashed border-slate-300 text-slate-400 mx-auto sm:mx-0">
+                <Package className="h-8 w-8 text-slate-300" />
+              </div>
+            )}
+            <div className="flex-1 min-w-0 text-center sm:text-left">
+              <p className="text-xs font-bold text-slate-800">
+                {form.image_url ? "Foto produk terpasang" : "Belum ada foto produk"}
+              </p>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Format JPG, PNG, atau WebP (maks. 5 MB).
+              </p>
+              <div className="mt-2.5 flex items-center justify-center sm:justify-start gap-2">
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 shadow-2xs hover:bg-indigo-100 active:scale-95">
+                  <Camera className="h-3.5 w-3.5" />
+                  <span>{busy ? "Mengunggah..." : form.image_url ? "Ganti foto" : "Pilih foto"}</span>
+                  <input hidden type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={(event) => upload(event.target.files?.[0])} />
+                </label>
+                {form.image_url && (
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, image_url: "", image_public_id: "" })}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                  >
+                    <Trash2 className="h-3 w-3" /> Hapus foto
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
         {error && <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700 sm:col-span-2">{error}</p>}
         <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:flex sm:justify-end"><Button className="h-12 sm:h-9" type="button" variant="outline" onClick={() => setFormOpen(false)}>Batal</Button><Button className="h-12 sm:h-9" disabled={busy}><Save className="mr-2 h-4 w-4" />{busy ? "Menyimpan..." : "Simpan"}</Button></div>
       </form>
@@ -461,6 +636,134 @@ export default function ProductsPage() {
     </motion.div></motion.div>}</AnimatePresence>
 
     <AnimatePresence>{savedNotice && <motion.div initial={{ opacity: 0, y: 24, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16, scale: 0.96 }} className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-4 right-4 z-[80] mx-auto flex max-w-sm items-center gap-3 rounded-2xl bg-slate-950 px-4 py-3 text-white shadow-2xl"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500"><CheckCircle2 className="h-5 w-5" /></span><div><p className="text-sm font-bold">Data berhasil disimpan</p><p className="text-xs text-slate-300">Varian terbaru sudah ditampilkan.</p></div></motion.div>}</AnimatePresence>
+
+    <AnimatePresence>
+      {imageModalTarget && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-end bg-slate-950/45 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 40, scale: 0.96 }}
+            className="w-full max-w-md overflow-hidden rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl sm:p-6"
+          >
+            <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="grid h-8 w-8 place-items-center rounded-lg bg-indigo-50 text-indigo-600">
+                    <Camera className="h-4 w-4" />
+                  </span>
+                  <h3 className="text-lg font-bold text-slate-950">Ganti Foto Produk</h3>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  {imageModalTarget.serviceName} · Berlaku untuk seluruh varian & bot WhatsApp
+                </p>
+              </div>
+              <button
+                type="button"
+                className="grid h-9 w-9 place-items-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200"
+                onClick={() => setImageModalTarget(null)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              {/* Preview Box */}
+              <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                {imageModalUrl ? (
+                  <div className="text-center">
+                    <img
+                      src={imageModalUrl}
+                      alt="Pratinjau"
+                      className="mx-auto h-32 w-32 rounded-2xl object-cover shadow-md ring-2 ring-indigo-200"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImageModalUrl("");
+                        setImageModalPublicId("");
+                      }}
+                      className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-rose-600 hover:text-rose-700"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Hapus foto produk
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-4 text-slate-400">
+                    <Package className="h-12 w-12 text-slate-300 mb-1" />
+                    <span className="text-xs text-slate-500">Belum ada foto yang dipasang</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Upload Input Area */}
+              <div>
+                <label className="relative flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 p-5 text-center transition hover:border-indigo-400 hover:bg-indigo-50 active:scale-[0.99]">
+                  {imageModalBusy ? (
+                    <div className="flex flex-col items-center gap-2 py-2">
+                      <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
+                      <span className="text-xs font-bold text-indigo-700">Mengunggah ke server...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-600 text-white shadow-sm">
+                        <Upload className="h-5 w-5" />
+                      </div>
+                      <p className="mt-2 text-xs font-bold text-slate-900">
+                        {imageModalUrl ? "Klik untuk ganti foto baru" : "Klik untuk pilih foto dari perangkat"}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-slate-500">
+                        Mendukung JPG, PNG, atau WebP (maksimal 5 MB)
+                      </p>
+                    </>
+                  )}
+                  <input
+                    hidden
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    disabled={imageModalBusy}
+                    onChange={(event) => uploadServiceImageFile(event.target.files?.[0])}
+                  />
+                </label>
+              </div>
+
+              {imageModalError && (
+                <p className="rounded-xl bg-rose-50 p-3 text-xs font-medium text-rose-700">
+                  {imageModalError}
+                </p>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <Button
+                variant="outline"
+                onClick={() => setImageModalTarget(null)}
+                disabled={imageModalBusy}
+              >
+                Batal
+              </Button>
+              <Button
+                onClick={saveServiceImage}
+                disabled={imageModalBusy}
+                className="bg-indigo-600 text-white hover:bg-indigo-700 font-bold"
+              >
+                {imageModalBusy ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                Simpan Foto
+              </Button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   </div>;
 }
 

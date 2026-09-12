@@ -18,5 +18,12 @@ export const productMasterService = {
   async reorderVariants(items: Array<{ id: string; sortOrder: number }>) { for (const item of items) await this.updateVariantOrder(item.id, item.sortOrder); },
   async deleteService(name: string) { const { error } = await supabase.from("products").delete().eq("name", name); fail(error); },
   async deleteCategory(name: string, category: string) { const { error } = await supabase.from("products").delete().eq("name", name).eq("category", category); fail(error); },
+  async updateServiceImage(name: string, imageUrl: string | null, imagePublicId: string | null) {
+    const { error } = await supabase
+      .from("products")
+      .update({ image_url: imageUrl, image_public_id: imagePublicId })
+      .eq("name", name);
+    fail(error);
+  },
   subscribe(onChange: () => void) { const channel = supabase.channel("products-admin").on("postgres_changes", { event: "*", schema: "public", table: "products" }, onChange).subscribe(); return () => { void supabase.removeChannel(channel); }; }
 };

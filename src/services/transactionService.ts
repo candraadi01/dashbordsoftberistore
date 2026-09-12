@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { TransactionRow, TransactionStatus, TransactionUpdate } from "@/types";
+import { transactionRealtimeService } from "@/services/transactionRealtimeService";
 
 function statusErrorMessage(message: string) {
   const normalized = message.toLowerCase();
@@ -29,6 +30,7 @@ export const transactionService = {
       if (error) throw new Error(statusErrorMessage(error.message));
       const saved = (Array.isArray(data) ? data[0] : data) as TransactionRow | null;
       if (!saved?.id) throw new Error("Supabase tidak mengembalikan transaksi yang diperbarui. Jalankan file SQL hotfix lalu coba lagi.");
+      transactionRealtimeService.notifyLocalChange(saved, "UPDATE");
       return saved;
     } catch (caught) {
       if (caught instanceof Error && caught.name === "AbortError") {

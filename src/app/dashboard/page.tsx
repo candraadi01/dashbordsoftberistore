@@ -11,10 +11,12 @@ import { SalesTrendChart } from "@/components/dashboard/sales-trend-chart";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
 import {
   Activity,
   AlertCircle,
   CheckCircle2,
+  ChevronRight,
   Clock3,
   DollarSign,
   LayoutDashboard,
@@ -175,21 +177,64 @@ export default function DashboardPage() {
 
         <Card className="border-slate-200 bg-white shadow-sm">
           <CardHeader className="border-b border-slate-100 pb-4">
-            <CardTitle className="flex items-center justify-between text-base font-bold text-slate-950"><span className="flex items-center gap-2"><Receipt className="h-5 w-5 text-indigo-600" />Transaksi Terbaru</span><Badge variant="outline">{metrics.recentTransactions.length}</Badge></CardTitle>
-            <CardDescription className="mt-1 text-xs">Aktivitas terbaru pada periode terpilih</CardDescription>
+            <CardTitle className="flex items-center justify-between text-base font-bold text-slate-950">
+              <span className="flex items-center gap-2">
+                <Receipt className="h-5 w-5 text-indigo-600" />
+                Transaksi Terbaru
+              </span>
+              <Badge variant="outline">{metrics.recentTransactions.length}</Badge>
+            </CardTitle>
+            <CardDescription className="mt-1 text-xs">
+              Klik transaksi untuk langsung membuka dan mengubah status
+            </CardDescription>
           </CardHeader>
           <CardContent className="p-0">
             {metrics.recentTransactions.length === 0 ? (
-              <div className="grid min-h-64 place-items-center p-6 text-center"><div><Receipt className="mx-auto h-8 w-8 text-slate-300" /><p className="mt-3 text-sm font-semibold text-slate-700">Belum ada transaksi</p><p className="mt-1 text-xs text-slate-400">Coba pilih periode yang lebih panjang.</p></div></div>
+              <div className="grid min-h-64 place-items-center p-6 text-center">
+                <div>
+                  <Receipt className="mx-auto h-8 w-8 text-slate-300" />
+                  <p className="mt-3 text-sm font-semibold text-slate-700">Belum ada transaksi</p>
+                  <p className="mt-1 text-xs text-slate-400">Coba pilih periode yang lebih panjang.</p>
+                </div>
+              </div>
             ) : (
-              <div className="divide-y divide-slate-100">
-                {metrics.recentTransactions.map((transaction) => (
-                  <div key={transaction.id} className="flex items-center gap-3 p-4 transition-colors hover:bg-slate-50">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-sm font-black text-slate-600">{transaction.customer_name.slice(0, 1).toUpperCase()}</span>
-                    <div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-slate-900">{transaction.customer_name}</p><p className="truncate text-xs text-slate-500">{transaction.product_name} • {transaction.duration}</p></div>
-                    <div className="text-right"><p className="text-sm font-bold text-slate-900">{formatIDR(transaction.price)}</p><StatusBadge value={transaction.status} /></div>
-                  </div>
-                ))}
+              <div>
+                <div className="divide-y divide-slate-100">
+                  {metrics.recentTransactions.map((transaction) => (
+                    <Link
+                      key={transaction.id}
+                      href={`/dashboard/transactions?id=${encodeURIComponent(transaction.id)}&open=true`}
+                      className="group flex items-center gap-3 p-4 transition-all hover:bg-indigo-50/60 active:scale-[0.99]"
+                      title="Klik untuk membuka dan mengubah status transaksi"
+                    >
+                      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-sm font-black text-slate-600 transition group-hover:bg-indigo-600 group-hover:text-white">
+                        {transaction.customer_name.slice(0, 1).toUpperCase()}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-bold text-slate-900 group-hover:text-indigo-600">
+                          {transaction.customer_name}
+                        </p>
+                        <p className="truncate text-xs text-slate-500">
+                          {transaction.product_name} • {transaction.duration}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-slate-900">{formatIDR(transaction.price)}</p>
+                        <StatusBadge value={transaction.status} />
+                      </div>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-1 group-hover:text-indigo-600" />
+                    </Link>
+                  ))}
+                </div>
+                <div className="border-t border-slate-100 bg-slate-50/60 p-3 text-center">
+                  <Link
+                    href="/dashboard/transactions"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 transition hover:text-indigo-800"
+                  >
+                    <span>Buka halaman semua transaksi</span>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
               </div>
             )}
           </CardContent>
