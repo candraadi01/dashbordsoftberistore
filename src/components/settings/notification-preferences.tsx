@@ -20,6 +20,7 @@ import {
   playNotificationSound,
 } from "@/lib/notificationSound";
 import { cn } from "@/lib/utils";
+import { usePushNotification } from "@/hooks/usePushNotification";
 
 const MAX_AUDIO_BYTES = 1.5 * 1024 * 1024;
 
@@ -91,6 +92,7 @@ const EVENT_OPTIONS: Array<{
 
 export function NotificationPreferences() {
   const { settings, updateSetting } = useSettings();
+  const push = usePushNotification();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
@@ -186,6 +188,38 @@ export function NotificationPreferences() {
           />
         </div>
       </div>
+
+      {/* Toggle Native OS Push Notification */}
+      {push.isSupported && (
+        <div className="border-b border-slate-100 bg-slate-50/50 px-4 py-4 sm:px-5">
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-indigo-100 bg-white p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-indigo-50 text-indigo-600">
+                <BellRing className="h-5 w-5" />
+              </span>
+              <div>
+                <p className="text-sm font-bold text-slate-900">Notifikasi OS / HP (Latar Belakang)</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Terima notifikasi native di layar HP meski browser/dashboard sedang ditutup.
+                </p>
+                {push.status === "denied" && (
+                  <p className="mt-1 text-[11px] font-semibold text-rose-600">
+                    Izin diblokir. Mohon izinkan notifikasi dari pengaturan browser Anda.
+                  </p>
+                )}
+              </div>
+            </div>
+            <Toggle
+              checked={push.status === "granted"}
+              onChange={(checked) => {
+                if (checked) void push.subscribe();
+                else void push.unsubscribe();
+              }}
+              label="Aktifkan Notifikasi OS"
+            />
+          </div>
+        </div>
+      )}
 
       <div className={cn("space-y-6 p-4 transition-opacity sm:p-5", !settings.notificationEnabled && "opacity-55")}>
         <fieldset disabled={!settings.notificationEnabled} className="space-y-3">
