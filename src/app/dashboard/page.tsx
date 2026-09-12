@@ -12,6 +12,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
+import { supabase } from "@/lib/supabase";
+import { BotInstanceRow } from "@/types";
 import {
   Activity,
   AlertCircle,
@@ -81,6 +83,62 @@ export default function DashboardPage() {
     return () => transactionRealtimeService.unsubscribe(channel);
   }, [isLoaded, loadData, settings.realtimeOn]);
 
+  // Realtime WhatsApp Bot Status
+  const [bot, setBot] = useState<BotInstanceRow | null>(null);
+  const [currentTime, setCurrentTime] = useState(Date.now());
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadBotStatus() {
+      try {
+        const { data: botData } = await supabase
+          .from("bot_instances")
+          .select("*")
+          .order("last_seen", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (botData && isMounted) {
+          setBot(botData as BotInstanceRow);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    void loadBotStatus();
+
+    const botChannel = supabase
+      .channel("overview_bot_status")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bot_instances" },
+        (payload) => {
+          if (payload.eventType === "DELETE") {
+            setBot(null);
+          } else if (payload.new) {
+            setBot(payload.new as BotInstanceRow);
+          }
+        }
+      )
+      .subscribe();
+
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+      void loadBotStatus();
+    }, 15_000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      void supabase.removeChannel(botChannel);
+    };
+  }, []);
+
+  const isBotOnline = Boolean(
+    bot && bot.status === "online" && currentTime - new Date(bot.last_seen).getTime() < 90_000
+  );
+
   if (isLoading || !data) {
     return (
       <div className="space-y-5">
@@ -116,9 +174,39 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">Overview Penjualan</h1>
           <p className="mt-1 text-sm text-slate-500">Pantau transaksi, omzet, dan keuntungan dari bot WhatsApp.</p>
         </div>
-        <div className="flex items-center gap-2 self-start rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 sm:self-auto">
-          <span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-50" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" /></span>
-          Realtime aktif{liveTransactions > 0 ? ` • ${liveTransactions} transaksi baru` : ""}
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          {/* Realtime Transaksi */}
+          <div className="flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 shadow-2xs">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-50" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+            </span>
+            <span>Realtime aktif{liveTransactions > 0 ? ` • ${liveTransactions} transaksi baru` : ""}</span>
+          </div>
+
+          {/* Status WhatsApp Bot Realtime */}
+          <div
+            className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold shadow-2xs transition-colors ${
+              isBotOnline
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-rose-200 bg-rose-50 text-rose-700"
+            }`}
+            title={bot ? `Terakhir aktif: ${new Date(bot.last_seen).toLocaleTimeString("id-ID")}` : "Bot belum terhubung"}
+          >
+            <span className="relative flex h-2.5 w-2.5">
+              {isBotOnline && (
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-50" />
+              )}
+              <span
+                className={`relative inline-flex h-2.5 w-2.5 rounded-full ${
+                  isBotOnline ? "bg-emerald-500" : "bg-rose-500"
+                }`}
+              />
+            </span>
+            <span className="flex items-center gap-1">
+              WhatsApp Bot: <span className="font-extrabold uppercase">{isBotOnline ? "Online" : "Offline"}</span>
+            </span>
+          </div>
         </div>
       </header>
 

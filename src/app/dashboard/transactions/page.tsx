@@ -7,7 +7,7 @@ import { authService } from "@/services/authService";
 import { transactionRealtimeService } from "@/services/transactionRealtimeService";
 import { transactionService } from "@/services/transactionService";
 import { TransactionRow, TransactionStatus } from "@/types";
-import { formatIDR } from "@/lib/utils";
+import { formatIDR, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -29,6 +29,7 @@ export default function TransactionsPage() {
   const [deleting, setDeleting] = useState<TransactionRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
   const [canEdit, setCanEdit] = useState(false);
   const hasAutoOpenedRef = useRef(false);
 
@@ -74,12 +75,12 @@ export default function TransactionsPage() {
     };
   }, [load]);
 
-  // Auto-open modal status if arrived from overview with ?id=...&open=true
+  // Auto-focus & open modal if arrived from overview with ?id=...
   useEffect(() => {
     if (rows.length === 0 || hasAutoOpenedRef.current) return;
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      const targetId = params.get("id") || params.get("search") || params.get("q");
+      const targetId = params.get("id");
       const shouldOpen = params.get("open") === "true" || params.get("edit") === "true";
 
       if (targetId) {
@@ -87,14 +88,56 @@ export default function TransactionsPage() {
           (r) => r.id === targetId || r.transaction_id === targetId || r.id.toLowerCase().startsWith(targetId.toLowerCase())
         );
         if (found) {
+          hasAutoOpenedRef.current = true;
+          setFocusedId(found.id);
+
+          window.setTimeout(() => {
+            const cardEl = document.getElementById(`tx-card-${found.id}`);
+            const rowEl = document.getElementById(`tx-row-${found.id}`);
+            (cardEl || rowEl)?.scrollIntoView({ behavior: "smooth", block: "center" });
+          }, 250);
+
           if (shouldOpen) {
-            hasAutoOpenedRef.current = true;
             openStatus(found);
           }
         }
       }
     }
   }, [rows]);
+
+  // Hilangkan blur jika user menggeser/scroll ke atas atau ke bawah
+  useEffect(() => {
+    if (!focusedId) return;
+
+    let startScrollY = typeof window !== "undefined" ? window.scrollY : 0;
+    const threshold = 30;
+
+    const onScroll = () => {
+      if (Math.abs(window.scrollY - startScrollY) > threshold) {
+        setFocusedId(null);
+      }
+    };
+
+    const onTouchMove = () => {
+      setFocusedId(null);
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) > 15) {
+        setFocusedId(null);
+      }
+    };
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("touchmove", onTouchMove, { passive: true });
+    window.addEventListener("wheel", onWheel, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("wheel", onWheel);
+    };
+  }, [focusedId]);
 
   const shown = useMemo(() => rows.filter((row) =>
     (filter === "all" || row.status === filter) &&
@@ -173,9 +216,163 @@ export default function TransactionsPage() {
     <Card><CardContent className="grid gap-3 p-4 sm:grid-cols-[1fr_190px]"><div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" /><input className="h-10 w-full rounded-xl border border-slate-200 pl-10 pr-3 text-sm outline-none focus:border-indigo-400" placeholder="Cari ID, customer, WhatsApp, atau produk" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select className="h-10 rounded-xl border border-slate-200 px-3 text-sm" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">Semua status</option><option value="pending">Pending</option><option value="success">Berhasil</option><option value="cancelled">Gagal</option></select></CardContent></Card>
     {error && <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
 
-    <div className="space-y-3 md:hidden">{shown.map((row) => <article key={row.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-mono text-[10px] text-slate-400">{row.transaction_id ?? row.id.slice(0, 8)}</p><h2 className="mt-1 truncate font-black text-slate-950">{row.customer_name}</h2><p className="text-xs text-slate-500">{row.customer_phone.replace("@lid", "")}</p></div><Status value={row.status} /></div><div className="my-4 rounded-xl bg-slate-50 p-3"><p className="font-bold text-slate-900">{row.product_name}</p><p className="text-xs text-slate-500">{row.category} • {row.duration}</p></div><div className="grid grid-cols-2 gap-2"><div><p className="text-[10px] font-semibold text-slate-400">TOTAL</p><p className="font-black text-slate-950">{formatIDR(row.price)}</p></div><div><p className="text-[10px] font-semibold text-slate-400">PROFIT</p><p className="font-black text-emerald-600">{formatIDR(row.profit_amount)}</p></div></div><SyncNote row={row} />{canEdit && <div className="mt-4 grid grid-cols-[1fr_44px] gap-2"><Button variant="outline" onClick={() => openStatus(row)} className="h-11"><RefreshCw className="mr-2 h-4 w-4" />Ubah status</Button><Button variant="outline" onClick={() => setDeleting(row)} className="h-11 border-rose-200 text-rose-600"><Trash2 className="h-4 w-4" /></Button></div>}</article>)}</div>
+    <div className="space-y-3 md:hidden">
+      {shown.map((row) => {
+        const isFocused = Boolean(focusedId && (row.id === focusedId || row.transaction_id === focusedId));
+        const isBlurred = Boolean(focusedId && !isFocused);
 
-    <Card className="hidden overflow-hidden md:block"><CardContent className="overflow-x-auto p-0"><table className="w-full min-w-[960px] text-left text-sm"><thead className="bg-slate-50 text-xs font-bold uppercase tracking-wide text-slate-500"><tr><th className="px-5 py-4">Transaksi</th><th className="px-5 py-4">Customer</th><th className="px-5 py-4">Produk</th><th className="px-5 py-4">Nilai</th><th className="px-5 py-4">Profit</th><th className="px-5 py-4">Status & Sinkron</th><th className="px-5 py-4">Waktu</th>{canEdit && <th className="px-5 py-4 text-right">Aksi</th>}</tr></thead><tbody className="divide-y divide-slate-100">{shown.map((row) => <tr key={row.id} className="hover:bg-slate-50"><td className="px-5 py-4 font-mono text-xs text-slate-500">{row.transaction_id ?? row.id.slice(0, 8)}</td><td className="px-5 py-4"><b className="block text-slate-900">{row.customer_name}</b><span className="text-xs text-slate-500">{row.customer_phone.replace("@lid", "")}</span></td><td className="px-5 py-4"><b className="block text-slate-800">{row.product_name}</b><span className="text-xs text-slate-500">{row.category} • {row.duration}</span></td><td className="px-5 py-4 font-semibold">{formatIDR(row.price)}</td><td className="px-5 py-4 font-semibold text-emerald-600">{formatIDR(row.profit_amount)}</td><td className="px-5 py-4"><Status value={row.status} /><SyncNote row={row} /></td><td className="px-5 py-4 text-xs text-slate-500">{new Date(row.created_at).toLocaleString("id-ID")}</td>{canEdit && <td className="px-5 py-4"><div className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={() => openStatus(row)}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Status</Button><Button size="icon" variant="ghost" className="text-rose-600" onClick={() => setDeleting(row)}><Trash2 className="h-4 w-4" /></Button></div></td>}</tr>)}</tbody></table>{shown.length === 0 && <p className="p-10 text-center text-sm text-slate-500">Tidak ada transaksi yang cocok.</p>}</CardContent></Card>
+        return (
+          <article
+            id={`tx-card-${row.id}`}
+            key={row.id}
+            className={cn(
+              "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-500",
+              isFocused && "ring-2 ring-indigo-500 shadow-xl bg-indigo-50/30 scale-[1.01] relative z-10",
+              isBlurred && "blur-[3.5px] opacity-30 select-none pointer-events-none"
+            )}
+          >
+            {isFocused && (
+              <div className="mb-2.5 inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-xs">
+                <span>★ Transaksi Terpilih</span>
+              </div>
+            )}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-mono text-[10px] text-slate-400">{row.transaction_id ?? row.id.slice(0, 8)}</p>
+                <h2 className="mt-1 truncate font-black text-slate-950">{row.customer_name}</h2>
+                <p className="text-xs text-slate-500">{row.customer_phone.replace("@lid", "")}</p>
+              </div>
+              <Status value={row.status} />
+            </div>
+            <div className="my-4 rounded-xl bg-slate-50 p-3">
+              <p className="font-bold text-slate-900">{row.product_name}</p>
+              <p className="text-xs text-slate-500">{row.category} • {row.duration}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <p className="text-[10px] font-semibold text-slate-400">TOTAL</p>
+                <p className="font-black text-slate-950">{formatIDR(row.price)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold text-slate-400">PROFIT</p>
+                <p className="font-black text-emerald-600">{formatIDR(row.profit_amount)}</p>
+              </div>
+            </div>
+            <SyncNote row={row} />
+            {canEdit && (
+              <div className="mt-4 grid grid-cols-[1fr_44px] gap-2">
+                <Button variant="outline" onClick={() => openStatus(row)} className="h-11">
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Ubah status
+                </Button>
+                <Button variant="outline" onClick={() => setDeleting(row)} className="h-11 border-rose-200 text-rose-600">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+          </article>
+        );
+      })}
+    </div>
+
+    <Card className="hidden overflow-hidden md:block">
+      <CardContent className="overflow-x-auto p-0">
+        <table className="w-full min-w-[960px] text-left text-sm">
+          <thead className="bg-slate-50 text-xs font-bold uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-5 py-4">Transaksi</th>
+              <th className="px-5 py-4">Customer</th>
+              <th className="px-5 py-4">Produk</th>
+              <th className="px-5 py-4">Nilai</th>
+              <th className="px-5 py-4">Profit</th>
+              <th className="px-5 py-4">Status & Sinkron</th>
+              <th className="px-5 py-4">Waktu</th>
+              {canEdit && <th className="px-5 py-4 text-right">Aksi</th>}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {shown.map((row) => {
+              const isFocused = Boolean(focusedId && (row.id === focusedId || row.transaction_id === focusedId));
+              const isBlurred = Boolean(focusedId && !isFocused);
+
+              return (
+                <tr
+                  id={`tx-row-${row.id}`}
+                  key={row.id}
+                  className={cn(
+                    "transition-all duration-500",
+                    isFocused && "bg-indigo-50/80 font-medium ring-2 ring-indigo-500 ring-inset shadow-xs relative z-10",
+                    isBlurred && "blur-[3.5px] opacity-30 select-none pointer-events-none",
+                    !isFocused && !isBlurred && "hover:bg-slate-50"
+                  )}
+                >
+                  <td className="px-5 py-4 font-mono text-xs text-slate-500">
+                    {row.transaction_id ?? row.id.slice(0, 8)}
+                    {isFocused && (
+                      <span className="ml-2 inline-block rounded bg-indigo-600 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                        Terpilih
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-5 py-4">
+                    <b className="block text-slate-900">{row.customer_name}</b>
+                    <span className="text-xs text-slate-500">{row.customer_phone.replace("@lid", "")}</span>
+                  </td>
+                  <td className="px-5 py-4">
+                    <b className="block text-slate-800">{row.product_name}</b>
+                    <span className="text-xs text-slate-500">{row.category} • {row.duration}</span>
+                  </td>
+                  <td className="px-5 py-4 font-semibold">{formatIDR(row.price)}</td>
+                  <td className="px-5 py-4 font-semibold text-emerald-600">{formatIDR(row.profit_amount)}</td>
+                  <td className="px-5 py-4">
+                    <Status value={row.status} />
+                    <SyncNote row={row} />
+                  </td>
+                  <td className="px-5 py-4 text-xs text-slate-500">{new Date(row.created_at).toLocaleString("id-ID")}</td>
+                  {canEdit && (
+                    <td className="px-5 py-4">
+                      <div className="flex justify-end gap-2">
+                        <Button size="sm" variant="outline" onClick={() => openStatus(row)}>
+                          <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                          Status
+                        </Button>
+                        <Button size="icon" variant="ghost" className="text-rose-600" onClick={() => setDeleting(row)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {shown.length === 0 && <p className="p-10 text-center text-sm text-slate-500">Tidak ada transaksi yang cocok.</p>}
+      </CardContent>
+    </Card>
+
+    {/* Floating Indicator Blur Status */}
+    <AnimatePresence>
+      {focusedId && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 20 }}
+          className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2.5 rounded-full bg-slate-950/90 px-4 py-2 text-xs font-semibold text-white shadow-2xl backdrop-blur-md"
+        >
+          <span className="h-2 w-2 rounded-full bg-indigo-400 animate-pulse" />
+          <span>Transaksi terpilih ditampilkan · Geser atas/bawah untuk melihat semua</span>
+          <button
+            type="button"
+            onClick={() => setFocusedId(null)}
+            className="ml-1 rounded-full bg-white/20 p-1 hover:bg-white/30 text-white"
+            title="Tampilkan semua transaksi"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </motion.div>
+      )}
+    </AnimatePresence>
 
     <AnimatePresence>{editing && <motion.div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-950/45 backdrop-blur-sm sm:items-center sm:p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }} className="max-h-[94dvh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:max-w-lg sm:rounded-3xl"><div className="flex items-start justify-between"><div><p className="text-xs font-bold uppercase text-indigo-600">Proses transaksi</p><h2 className="mt-1 text-xl font-black text-slate-950">Pilih status</h2><p className="text-xs text-slate-500">{editing.transaction_id ?? editing.id}</p></div><button type="button" disabled={busy || Boolean(modalSuccess)} onClick={closeStatus} className="grid h-11 w-11 place-items-center rounded-xl hover:bg-slate-100 disabled:opacity-40"><X /></button></div><div className="mt-5 space-y-2">{choices.map((item) => { const Icon=item.icon; const isCurrent=item.value === editing.status; return <button key={item.value} disabled={busy || Boolean(modalSuccess)} type="button" onClick={() => { setNextStatus(item.value); setModalError(""); }} className={`flex min-h-16 w-full items-center gap-3 rounded-2xl border p-3 text-left transition active:scale-[.98] disabled:cursor-wait ${item.style} ${nextStatus === item.value ? "ring-2 ring-indigo-300" : "opacity-75"}`}><Icon className="h-5 w-5" /><span><span className="flex items-center gap-2 text-sm font-black">{item.label}{isCurrent && <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold">Saat ini</span>}</span><span className="block text-xs opacity-75">{item.help}</span></span>{nextStatus === item.value && <CheckCircle2 className="ml-auto h-5 w-5" />}</button> })}</div><p className="mt-4 flex items-start gap-2 rounded-xl bg-blue-50 p-3 text-xs text-blue-700"><MessageCircle className="mt-0.5 h-4 w-4 shrink-0" />Status disimpan langsung ke database. Bot akan menerima pembaruan secara real-time atau melalui pemeriksaan cadangan maksimal sekitar 8 detik.</p>{modalError && <motion.p initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} role="alert" className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{modalError}</motion.p>}{modalSuccess && <motion.p initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="mt-3 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-700"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />{modalSuccess}</motion.p>}<Button onClick={saveStatus} disabled={busy || Boolean(modalSuccess)} className="mt-4 h-12 w-full bg-indigo-600 text-white hover:bg-indigo-700 disabled:cursor-wait disabled:opacity-70">{busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}{busy ? "Menyimpan ke database..." : nextStatus === editing.status ? "Kirim ulang status ke WhatsApp" : "Simpan dan sinkronkan"}</Button></motion.div></motion.div>}</AnimatePresence>
 
