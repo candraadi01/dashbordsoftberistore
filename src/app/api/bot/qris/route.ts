@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
+import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,10 +9,41 @@ export const dynamic = "force-dynamic";
 const PRIMARY_QRIS_PATH = path.join(process.cwd(), "public", "uploads", "qris", "payment.jpg");
 const BACKUP_QRIS_PATH = path.join(process.cwd(), "data", "payment.jpg");
 const LOCAL_DB_QRIS_PATH = path.join(process.cwd(), "database", "img", "payment", "payment.jpg");
+const TMP_QRIS_PATH = path.join("/tmp", "payment.jpg");
 const BOT_PANEL_QRIS = path.join("D:", "BOT WHSATAPP SUPABASE", "BOT DINDA", "BOT WHATSAP PANEL DINDA", "database", "img", "payment", "payment.jpg");
 
-function getActiveQrisBuffer(): { buffer: Buffer; mimeType: string } | null {
+function getSupabaseServer() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+  if (!url || !key) return null;
+  return createClient(url, key);
+}
+
+async function getActiveQrisBuffer(): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  // 1. Cek dari Supabase cloud jika ada base64
+  const sb = getSupabaseServer();
+  if (sb) {
+    try {
+      const { data } = await sb
+        .from("bot_instances")
+        .select("metadata")
+        .eq("id", "bot_settings")
+        .maybeSingle();
+
+      const base64 = data?.metadata?.qrisBase64;
+      if (base64 && typeof base64 === "string") {
+        const clean = base64.replace(/^data:image\/\w+;base64,/, "");
+        const buf = Buffer.from(clean, "base64");
+        if (buf && buf.length > 0) {
+          return { buffer: buf, mimeType: "image/jpeg" };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. Cek dari path disk lokal
   const candidatePaths = [
+    TMP_QRIS_PATH,
     PRIMARY_QRIS_PATH,
     BACKUP_QRIS_PATH,
     LOCAL_DB_QRIS_PATH,
@@ -19,39 +51,30 @@ function getActiveQrisBuffer(): { buffer: Buffer; mimeType: string } | null {
   ];
 
   for (const p of candidatePaths) {
-    if (fs.existsSync(p)) {
-      try {
+    try {
+      if (fs.existsSync(p)) {
         const buffer = fs.readFileSync(p);
         if (buffer && buffer.length > 0) {
           return { buffer, mimeType: "image/jpeg" };
         }
-      } catch (_) {}
-    }
+      }
+    } catch (_) {}
   }
   return null;
 }
 
-function saveBufferToAll(buffer: Buffer) {
-  const targetPaths = [
-    PRIMARY_QRIS_PATH,
-    BACKUP_QRIS_PATH,
-    LOCAL_DB_QRIS_PATH,
-    BOT_PANEL_QRIS,
-  ];
-
-  for (const target of targetPaths) {
-    try {
-      const dir = path.dirname(target);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.writeFileSync(target, buffer);
-    } catch (_) {}
-  }
+function safeWriteFile(filePath: string, buffer: Buffer) {
+  try {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(filePath, buffer);
+  } catch (_) {}
 }
 
 export async function HEAD() {
-  const active = getActiveQrisBuffer();
+  const active = await getActiveQrisBuffer();
   if (!active) {
     return new NextResponse(null, { status: 404 });
   }
@@ -66,7 +89,7 @@ export async function HEAD() {
 }
 
 export async function GET() {
-  const active = getActiveQrisBuffer();
+  const active = await getActiveQrisBuffer();
   if (!active) {
     return NextResponse.json({ error: "QRIS image not found" }, { status: 404 });
   }
@@ -123,7 +146,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No valid image data provided" }, { status: 400 });
     }
 
-    saveBufferToAll(buffer);
+    // 1. Simpan ke Supabase metadata (agar persist di Vercel Cloud Serverless)
+    const sb = getSupabaseServer();
+    if (sb) {
+      try {
+        const { data } = await sb
+          .from("bot_instances")
+          .select("metadata")
+          .eq("id", "bot_settings")
+          .maybeSingle();
+
+        const currentMeta = data?.metadata || {};
+        await sb.from("bot_instances").upsert({
+          id: "bot_settings",
+          name: "Bot Settings Configuration",
+          status: "online",
+          version: "2.0.0",
+          last_seen: new Date().toISOString(),
+          metadata: {
+            ...currentMeta,
+            qrisBase64: `data:image/jpeg;base64,${buffer.toString("base64")}`,
+            updatedAt: Date.now()
+          },
+          updated_at: new Date().toISOString()
+        });
+      } catch (sbErr) {
+        console.warn("[bot/qris Supabase Sync]", sbErr);
+      }
+    }
+
+    // 2. Simpan ke disk lokal jika writable (/tmp selalu writable di Vercel)
+    safeWriteFile(TMP_QRIS_PATH, buffer);
+    safeWriteFile(PRIMARY_QRIS_PATH, buffer);
+    safeWriteFile(BACKUP_QRIS_PATH, buffer);
+    safeWriteFile(LOCAL_DB_QRIS_PATH, buffer);
+    safeWriteFile(BOT_PANEL_QRIS, buffer);
 
     return NextResponse.json({
       ok: true,

@@ -53,36 +53,57 @@ function getSupabaseServer() {
   return createClient(url, key);
 }
 
-function readBotSettings(): BotSettings {
+async function fetchBotSettings(): Promise<BotSettings> {
+  const sb = getSupabaseServer();
+  if (sb) {
+    try {
+      const { data, error } = await sb
+        .from("bot_instances")
+        .select("metadata")
+        .eq("id", "bot_settings")
+        .maybeSingle();
+
+      if (data && data.metadata && (data.metadata as any).statusMessages) {
+        return {
+          ...defaultBotSettings,
+          ...(data.metadata as any),
+        };
+      }
+    } catch (sbErr) {
+      console.warn("[bot/settings fetch Supabase]", sbErr);
+    }
+  }
+
+  // Fallback: baca dari file lokal jika ada
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
       const raw = fs.readFileSync(SETTINGS_FILE, "utf-8");
       return { ...defaultBotSettings, ...JSON.parse(raw) };
     }
-  } catch (err) {
-    console.warn("[bot/settings GET]", err);
-  }
+  } catch (_) {}
+
   return defaultBotSettings;
 }
 
 function syncToFile(filePath: string, content: string) {
   try {
     const dir = path.dirname(filePath);
-    if (fs.existsSync(dir)) {
-      fs.writeFileSync(filePath, content, "utf-8");
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
     }
+    fs.writeFileSync(filePath, content, "utf-8");
   } catch (_) {}
 }
 
 export async function GET() {
-  const settings = readBotSettings();
+  const settings = await fetchBotSettings();
   return NextResponse.json({ ok: true, success: true, settings, data: settings });
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const current = readBotSettings();
+    const current = await fetchBotSettings();
 
     const updated: BotSettings = {
       statusMessages: {
@@ -102,22 +123,11 @@ export async function POST(req: NextRequest) {
       updatedAt: Date.now(),
     };
 
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-
-    const jsonStr = JSON.stringify(updated, null, 2);
-    fs.writeFileSync(SETTINGS_FILE, jsonStr, "utf-8");
-
-    // Sinkronkan langsung ke folder database lokal & folder bot panel Dinda
-    syncToFile(path.join(process.cwd(), "database", "bot_settings.json"), jsonStr);
-    syncToFile(BOT_PANEL_SETTINGS, jsonStr);
-
-    // Sinkronkan ke Supabase bot_instances table (id: bot_settings) secara non-blocking
+    // 1. Simpan ke Supabase sebagai sumber data utama (Cloud / Vercel Serverless Ready)
     const sb = getSupabaseServer();
     if (sb) {
-      Promise.race([
-        sb.from("bot_instances").upsert({
+      try {
+        const { error: sbError } = await sb.from("bot_instances").upsert({
           id: "bot_settings",
           name: "Bot Settings Configuration",
           status: "online",
@@ -125,11 +135,26 @@ export async function POST(req: NextRequest) {
           last_seen: new Date().toISOString(),
           metadata: updated as any,
           updated_at: new Date().toISOString()
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 3000))
-      ]).catch((sbErr) => {
-        console.warn("[bot/settings Supabase Sync]", sbErr?.message || sbErr);
-      });
+        });
+        if (sbError) {
+          console.warn("[bot/settings Supabase Upsert]", sbError.message);
+        }
+      } catch (sbEx) {
+        console.warn("[bot/settings Supabase Exception]", sbEx);
+      }
+    }
+
+    // 2. Coba simpan ke file lokal (aman dari error EROFS di Vercel)
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+      const jsonStr = JSON.stringify(updated, null, 2);
+      fs.writeFileSync(SETTINGS_FILE, jsonStr, "utf-8");
+      syncToFile(path.join(process.cwd(), "database", "bot_settings.json"), jsonStr);
+      syncToFile(BOT_PANEL_SETTINGS, jsonStr);
+    } catch (_) {
+      // Abaikan error file system read-only di serverless hosting seperti Vercel
     }
 
     return NextResponse.json({ ok: true, success: true, settings: updated, data: updated });
