@@ -8,7 +8,7 @@ import { authService } from "@/services/authService";
 import { UserRole } from "@/types";
 import {
   Activity,
-  DollarSign,
+  MessageSquareText,
   LayoutDashboard,
   LogOut,
   Package,
@@ -25,8 +25,8 @@ export const dashboardNavigation = [
   { name: "Customers CRM", href: "/dashboard/customers", icon: Users },
   { name: "Transactions", href: "/dashboard/transactions", icon: Receipt },
   { name: "Products", href: "/dashboard/products", icon: Package },
+  { name: "Pesan Bot & QRIS", href: "/dashboard/finance", icon: MessageSquareText },
   { name: "Reports", href: "/dashboard/reports", icon: PieChart },
-  { name: "Finance", href: "/dashboard/finance", icon: DollarSign },
   { name: "Monitoring", href: "/dashboard/monitoring", icon: Activity },
   { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
@@ -35,7 +35,7 @@ export function getVisibleNavigation(role: UserRole | null) {
   return dashboardNavigation.filter((item) => {
     if (
       role === "STAFF" &&
-      ["Reports", "Settings", "Finance", "Products"].includes(item.name)
+      ["Reports", "Settings", "Pesan Bot & QRIS", "Products"].includes(item.name)
     ) {
       return false;
     }

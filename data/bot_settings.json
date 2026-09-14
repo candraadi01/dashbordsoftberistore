@@ -1,0 +1,17 @@
+{
+  "statusMessages": {
+    "pending": "Halo, Pesanan kamu dengan ID *{id}* untuk produk *{product}* Kategori *{category}* saat ini berstatus *PENDING*. Mohon menunggu konfirmasi admin ya!",
+    "success": "Halo, Pesanan kamu dengan ID *{id}* untuk produk *{product}* Kategori *{category}* saat ini berstatus *BERHASIL*. Terima kasih telah berbelanja!",
+    "cancelled": "Pesanan Anda dibatalkan. Silakan hubungi admin jika memerlukan bantuan."
+  },
+  "payment": {
+    "greetingTemplate": "Hello Kak *{customer}* 👋\n\nTotalnya menjadi: *{total}*{discount}\nSilakan transfer ke salah satu metode pembayaran berikut:",
+    "dana": "085737453120",
+    "bri": "614101027583536",
+    "ewallet": "085737453120",
+    "accountName": "DNH",
+    "footerNotes": "• ShopeePay: 085737453120 (dndahiday13_)\n• OVO: 085785040148 (M)\n• GoPay: 085785040148 (M/DNH)\n\n🔔 Setelah transfer, kirimkan bukti pembayaran di chat ini untuk aktivasi paket. Terima kasih!",
+    "qrisImageUrl": "/api/bot/qris"
+  },
+  "updatedAt": 1789378206682
+}
